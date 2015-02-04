@@ -122,7 +122,7 @@ public class ParseOSM {
 					for (int i = 0; i < kcount; i++) {
 						String key = getStringById(w.getKeys(i));
 						// FIXME: also check for boundary=administrative
-						if ("admin_level".equals(key)) {
+						if ("admin_level".equals(key) || "boundary".equals(key)) {
 							nodes[rcount] |= 2;
 							break;
 						}
@@ -323,8 +323,7 @@ public class ParseOSM {
 
 		StringBuilder buf = new StringBuilder();
 
-		ArrayList<long[]> ifragments = new ArrayList<>(),
-				ofragments = new ArrayList<>();
+		ArrayList<long[]> fragments = new ArrayList<>();
 
 		Appendable output;
 
@@ -361,11 +360,14 @@ public class ParseOSM {
 		@Override
 		protected void parseWays(List<Way> ws) {
 			for (Way w : ws) {
+				long[] data = ways.get(w.getId());
+				if (data == null || (data[data.length - 1] & 0x3L) == 2L) {
+					continue;
+				}
 				metadata.reset(w);
 				if (metadata.accept()) {
 					buf.delete(0, buf.length());
 					metadata.append(buf);
-					buf.append("\touter");
 					int rcount = w.getRefsCount();
 					long id = 0; // Delta coded!
 					int last = Integer.MAX_VALUE;
@@ -418,8 +420,7 @@ public class ParseOSM {
 				if (!metadata.accept()) {
 					return;
 				}
-				ifragments.clear();
-				ofragments.clear();
+				fragments.clear();
 				buf.delete(0, buf.length());
 				metadata.append(buf);
 				int trunk = buf.length(); // For re-truncating
@@ -437,12 +438,11 @@ public class ParseOSM {
 						continue;
 					}
 					String role = getStringById(r.getRolesSid(i));
+					if (!"outer".equals(role) && !"inner".equals(role)) {
+						continue; // Unknown role
+					}
 					// Note: last value is used for flags.
 					if (nodes[0] == nodes[nodes.length - 2]) {
-						if (!"outer".equals(role) && !"inner".equals(role)) {
-							continue; // Unknown role
-						}
-						buf.append('\t').append(role);
 						int t2 = buf.length();
 						appendToBuf(nodes, 0);
 						if (buf.length() > t2) {
@@ -451,26 +451,15 @@ public class ParseOSM {
 							buf.delete(trunk, buf.length());
 						}
 					} else {
-						if ("outer".equals(role)) {
-							ofragments.add(nodes);
-						} else if ("inner".equals(role)) {
-							ifragments.add(nodes);
-						}
+						fragments.add(nodes);
 					}
 				}
-				if (ofragments.size() > 0) {
+				if (fragments.size() > 0) {
 					// Clear flags:
-					for (long[] way : ofragments) {
+					for (long[] way : fragments) {
 						way[way.length - 1] = 0L;
 					}
-					ringAssignment("outer", ofragments, r.getId(), trunk);
-				}
-				if (ifragments.size() > 0) {
-					// Clear flags:
-					for (long[] way : ifragments) {
-						way[way.length - 1] = 0L;
-					}
-					ringAssignment("inner", ifragments, r.getId(), trunk);
+					ringAssignment(fragments, r.getId(), trunk);
 				}
 			} catch (IOException e) { // Can't throw IO here.
 				throw new RuntimeException(e);
@@ -518,9 +507,8 @@ public class ParseOSM {
 			}
 		}
 
-		protected void ringAssignment(String role,
-				Collection<long[]> fragments, long rid, int trunk)
-				throws IOException {
+		protected void ringAssignment(Collection<long[]> fragments, long rid,
+				int trunk) throws IOException {
 			for (long[] l : fragments) {
 				if (l[l.length - 1] != 0L) {
 					continue; // Already assigned.
@@ -528,7 +516,6 @@ public class ParseOSM {
 				l[l.length - 1] = 1; // Mark assigned.
 				long first = l[0], last = l[l.length - 2];
 				buf.delete(trunk, buf.length());
-				buf.append('\t').append(role);
 				int t2 = buf.length();
 				appendToBuf(l, 0);
 				if (ringAssignment(fragments, rid, first, last)) {
@@ -590,16 +577,18 @@ public class ParseOSM {
 		}
 
 		public class Metadata {
-			String levl = null, name = null, iname = null, wiki = null,
-					boun = null, coun = null;
+			String levl = null, name = null, inam = null, wiki = null,
+					wikd = null, boun = null, coun = null, plac = null;
 
 			public void reset() {
 				levl = null;
 				name = null;
 				boun = null;
-				iname = null;
+				inam = null;
 				wiki = null;
+				wikd = null;
 				coun = null;
+				plac = null;
 			}
 
 			public void reset(Relation r) {
@@ -636,10 +625,10 @@ public class ParseOSM {
 					name = (name == null) ? val : name;
 					break;
 				case "int_name":
-					iname = val;
+					inam = val;
 					break;
 				case "name:en":
-					iname = (iname == null) ? val : iname;
+					inam = (inam == null) ? val : inam;
 					break;
 				case "wikipedia":
 					wiki = val;
@@ -647,8 +636,26 @@ public class ParseOSM {
 				case "wikipedia:en":
 					wiki = (wiki == null) ? val : wiki;
 					break;
-				case "is_in:country":
+				case "wikidata":
+					wikd = val;
+					break;
+				case "is_in:country_code":
 					coun = val;
+					break;
+				case "addr:country":
+				case "is_in:country":
+					coun = (coun == null) ? val : coun;
+					break;
+				case "ISO3166-1":
+				case "ISO3166-2":
+				case "is_in:iso_3166_1":
+				case "is_in:iso_3166_2":
+					coun = (coun == null) ? val.substring(0, 2) : coun;
+					break;
+				case "place":
+				case "de:place":
+				case "boundary_type":
+					plac = val;
 					break;
 				case "boundary":
 					boun = val;
@@ -663,9 +670,11 @@ public class ParseOSM {
 
 			public void append(StringBuilder buf) {
 				buf.append(name);
-				buf.append('\t').append(iname == null ? name : iname);
-				buf.append('\t').append(wiki == null ? "" : wiki);
+				buf.append('\t').append(inam == null ? name : inam);
 				buf.append('\t').append(coun == null ? "" : coun);
+				buf.append('\t').append(plac == null ? "" : plac);
+				buf.append('\t').append(wiki == null ? "" : wiki);
+				buf.append('\t').append(wikd == null ? "" : wikd);
 				buf.append('\t').append(levl);
 			}
 		}
