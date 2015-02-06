@@ -1,11 +1,14 @@
 package com.kno10.reversegeocode.builder;
 
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -37,6 +40,9 @@ import com.gs.collections.impl.list.mutable.primitive.FloatArrayList;
 import com.gs.collections.impl.set.mutable.UnifiedSet;
 
 public class BuildIndex extends Application {
+	// Resolution of the input coordinates
+	private static final double INPUT_RESOLUION = 0.01;
+
 	File infile, oufile;
 
 	Pattern coordPattern = Pattern
@@ -59,15 +65,16 @@ public class BuildIndex extends Application {
 	public BuildIndex() {
 		super();
 		String infile = "/nfs/multimedia/OpenStreetMap/20150126/administrative-polys.tsv.gz";
+		String outfile = "osm-20150126.bin";
 		this.infile = new File(infile);
-		// this.oufile = new File(outfile);
+		this.oufile = new File(outfile);
 		this.entities = new UnifiedSet<>();
 
 		// Viewport on map
 		xcover = 360.;
 		xshift = 180;
 		ycover = 140.;
-		yshift = 80;
+		yshift = 60;
 		double mult = 1. / 0.05; // 1/degree resolution.
 		this.width = (int) Math.ceil(xcover * mult);
 		this.height = (int) Math.ceil(ycover * mult);
@@ -84,12 +91,14 @@ public class BuildIndex extends Application {
 		StringBuilder buf = new StringBuilder();
 		FloatArrayList points = new FloatArrayList();
 		BoundingBox bb = new BoundingBox();
-		int polycount = 0;
+		int polycount = 0, lines = 0;
 		// Everybody just "loves" such Java constructs:
 		try (BufferedReader b = new BufferedReader(new InputStreamReader(
 				new GZIPInputStream(new FileInputStream(infile))))) {
+			long start = System.currentTimeMillis();
 			String line = null;
 			while ((line = b.readLine()) != null) {
+				++lines;
 				buf.delete(0, buf.length()); // Reset the buffer
 				points.clear();
 				bb.reset();
@@ -129,8 +138,11 @@ public class BuildIndex extends Application {
 				}
 			}
 
-			System.err.println("Have " + entities.size() + " entities, "
-					+ polycount + " polgons.");
+			long end = System.currentTimeMillis();
+			System.err.println("Parsing time: " + (end - start) + " ms");
+			System.err.println("Read " + lines + " lines, kept "
+					+ entities.size() + " entities, " + polycount
+					+ " polygons.");
 
 			render(stage);
 		} catch (IOException e) {
@@ -145,8 +157,10 @@ public class BuildIndex extends Application {
 		Scene scene = new Scene(rootGroup, width, height, Color.BLACK);
 		WritableImage writableImage = null; // Buffer
 
-		int[][] winner = new int[width][height];
-		byte[][] alphas = new byte[width][height];
+		double strokewidth = INPUT_RESOLUION * .5 * xscale;
+
+		int[][] winner = new int[height][width];
+		byte[][] alphas = new byte[height][width];
 
 		long start = System.currentTimeMillis();
 		// Sort by size.
@@ -154,26 +168,30 @@ public class BuildIndex extends Application {
 		Collections.sort(order);
 		final int div = order.size() / 10; // Logging
 		int c = 0;
+		Path path = new Path();
+		ObservableList<PathElement> elems = path.getElements();
 		for (Entity e : order) {
 			++c;
 			if (c % div == 0) {
-				System.err.format("%d%%\n", (c * 100) / order.size());
+				System.err.format("Drawing %.0f%%\n", (c * 100.) / order.size());
 			}
 			if (e.polys.size() <= 0) {
 				continue;
 			}
-			Path path = new Path();
-			ObservableList<PathElement> elems = path.getElements();
+			// Implementation note: we are drawing upside down.
+			elems.clear();
 			for (float[] f : e.polys) {
 				assert (f.length > 1);
-				elems.add(new MoveTo((f[0] + xshift) * xscale, (f[1] - yshift)
-						* -yscale));
+				elems.add(new MoveTo((f[0] + xshift) * xscale, //
+						(f[1] + yshift) * yscale));
 				for (int i = 2, l = f.length; i < l; i += 2) {
-					elems.add(new LineTo((f[i] + xshift) * xscale,
-							(f[i + 1] - yshift) * -yscale));
+					elems.add(new LineTo((f[i] + xshift) * xscale, //
+							(f[i + 1] + yshift) * yscale));
 				}
 			}
-			path.setStroke(Color.TRANSPARENT);
+			// path.setStrokeType(StrokeType.INSIDE);
+			path.setStroke(Color.WHITE);
+			path.setStrokeWidth(strokewidth);
 			path.setFill(Color.WHITE);
 			path.setFillRule(FillRule.EVEN_ODD);
 
@@ -184,11 +202,10 @@ public class BuildIndex extends Application {
 					(int) Math.floor((e.bb.lonmin + xshift) * xscale));
 			int xmax = Math.min(width - 1,
 					(int) Math.ceil((e.bb.lonmax + xshift) * xscale));
-			// Note: y axis is reversed!
-			int ymax = Math.min(height - 1,
-					(int) Math.floor((e.bb.latmin - yshift) * -yscale));
 			int ymin = Math.max(0,
-					(int) Math.ceil((e.bb.latmax - yshift) * -yscale));
+					(int) Math.ceil((e.bb.latmin + yshift) * yscale));
+			int ymax = Math.min(height - 1,
+					(int) Math.floor((e.bb.latmax + yshift) * yscale));
 			// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
 
 			writableImage = scene.snapshot(writableImage);
@@ -199,21 +216,123 @@ public class BuildIndex extends Application {
 				for (int x = xmin; x <= xmax; x++) {
 					int col = reader.getArgb(x, y);
 					int alpha = (col & 0xFF);
-					// Ignore cover less than 10%
-					alpha -= 0x19;
+					// Always ignore cover less than 10%
+					if (alpha < 0x19) {
+						continue;
+					}
 					// Clip value range to positive bytes,
-					// i.E. always overwrite at a coverage of >=60%
 					alpha = alpha > 0x7F ? 0x7F : alpha;
-					if (alpha > 0 && alpha >= alphas[x][y]) {
-						alphas[x][y] = (byte) alpha;
-						winner[x][y] = c;
+					if (alpha == 0x7F || (alpha > 0 && alpha >= alphas[y][x])) {
+						alphas[y][x] = (byte) alpha;
+						winner[y][x] = c;
 					}
 				}
 			}
 		}
 		long end = System.currentTimeMillis();
-		System.err.println("Time: " + (end - start));
+		System.err.println("Rendering time: " + (end - start) + " ms");
+
+		buildIndex(order, winner);
 		visualize(order.size(), winner);
+	}
+
+	private void buildIndex(ArrayList<Entity> order, int[][] winner) {
+		int[] map = new int[order.size() + 1];
+		// Scan pixels for used indexes.
+		for (int y = 0; y < height; y++) {
+			int[] row = winner[y];
+			for (int x = 0; x < width; x++) {
+				map[row[x]] = 1;
+			}
+		}
+		// Enumerate used indexes.
+		int c = 0;
+		for (int i = 0; i < map.length; i++) {
+			map[i] = (map[i] == 0) ? -1 : c++;
+		}
+		System.err.println("Number of used entities: " + c);
+		byte[] buffer = new byte[width * 8]; // Output buffer.
+
+		if (c > 0x8000) {
+			// In this case, you'll need to extend the file format below.
+			throw new RuntimeException(
+					"Current file version only allows 0x8000 entities.");
+		}
+
+		try (DataOutputStream os = new DataOutputStream(//
+				new FileOutputStream(oufile))) {
+			// Part 1: HEADER
+			// Write a "magic" header first.
+			os.writeInt(0x6e0_6e0_00);
+			// Write dimensions
+			os.writeShort(width);
+			os.writeShort(height);
+			// Write the number of indexes
+			os.writeShort(c);
+
+			// Part 2: PIXMAP rows
+			// Encode the rows
+			byte[][] rows = new byte[height][];
+			for (int y = 0; y < height; y++) {
+				int len = encodeLine(winner[y], map, buffer);
+				rows[y] = Arrays.copyOf(buffer, len);
+			}
+			// Write the row header table
+			for (int y = 0; y < height; y++) {
+				os.writeShort(rows[y].length);
+			}
+			// Write the row header table
+			for (byte[] row : rows) {
+				os.write(row, 0, row.length);
+			}
+			rows = null;
+
+			// Part 3: METADATA
+			byte[][] metadata = new byte[c][];
+			metadata[0] = "Earth".getBytes("UTF-8");
+			int c2 = 1;
+			for (int i = 1; i < map.length; i++) {
+				if (map[i] > -1) {
+					metadata[c2++] = order.get(i - 1).key.getBytes("UTF-8");
+				}
+			}
+			assert (c2 == c);
+			// Write the metadata header table
+			for (int y = 0; y < height; y++) {
+				os.writeShort(metadata[y].length);
+			}
+			// Write the metadata header table
+			for (byte[] row : metadata) {
+				os.write(row, 0, row.length);
+			}
+			metadata = null;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+	// TODO: develop even more compact RLEs for this use case.
+	private int encodeLine(int[] winner, int[] map, byte[] buffer) {
+		int len = 0;
+		// Perform a simple run-length encoding.
+		for (int x = 0; x < winner.length; ++x) {
+			final int cur = winner[x];
+			int run = 0; // Run length - 1
+			for (; run < 256 && x + 1 < winner.length && winner[x + 1] == cur; ++x) {
+				++run;
+			}
+			int val = map[cur];
+			assert (val <= 0x7FFF);
+			if (run > 0) {
+				buffer[len++] = (byte) (((val >>> 8) & 0xFF) | 0x80);
+				buffer[len++] = (byte) (val & 0xFF);
+				buffer[len++] = (byte) (run - 1);
+			} else { // Note: high bit must not be set!
+				buffer[len++] = (byte) ((val >>> 8) & 0xFF);
+				buffer[len++] = (byte) (val & 0xFF);
+			}
+		}
+		return len;
 	}
 
 	/**
@@ -235,8 +354,9 @@ public class BuildIndex extends Application {
 			WritableImage writableImage = new WritableImage(width, height);
 			PixelWriter writer = writableImage.getPixelWriter();
 			for (int y = 0; y < height; y++) {
+				int[] row = winner[height - 1 - y]; // Note: upside down
 				for (int x = 0; x < width; x++) {
-					writer.setArgb(x, y, cols[winner[x][y]]);
+					writer.setArgb(x, y, cols[row[x]]);
 				}
 			}
 			ImageIO.write(SwingFXUtils.fromFXImage(writableImage, null), "png",

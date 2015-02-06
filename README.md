@@ -70,12 +70,47 @@ system paths (have a look at the pom.xml, for what you need).
 
 The index essentially is a large pixmap referencing metadata from OSM.
 
+### Rendering
+
 Rendering is currently done via JavaFX, so you will also need to have a UI for
 building an index. Unfortunately, this is also rather slow (10-30 minutes,
 depending on the desired resolution and number of polygons to render). However,
 we needed an API that can render polygons with the even-odd rule and antialiasing,
 and the java-gnome Cairo API wouldn't allow us access the resulting bitmaps without
 writing them to disk as PNG.
+
+Unfortunately, this also puts a limit to the maximum resolution. The default JavaFX
+renderer seems to max out at 8192 "texture size", so you cannot reach 0.04 degree
+resolution while using the full map. You will have to either use some strategy to not
+draw the whole map at once with JavaFX, or restrict the viewport.
+
+### File Format
+
+The file format is designed to be low-level, compact and efficient. It is meant to
+be used via read-only shared memory mapping, to make best use of operating
+system caching capabilities. The compression is less than what you could obtain with
+PNG encoding or GZIP, but it allows skipping over data without decoding it into
+application memory.
+
+1. 4 bytes: magic header that identifies the file format. Currently,
+this is the code 0x6e06e000, and I will increment the last byte on format changes.
+2. 2 bytes: width of the map
+3. 2 bytes: height of the map
+4. 2 bytes: number of entities (max 0x8000)
+5. height * 2 bytes: length of each row
+6. x bytes for each row, as listed before (row encoding: see below)
+7. nument * 2 bytes: length of metadata entries
+8. x bytes for each metadata
+
+Each row is encoded using a run-length encoding. Either 2 or 3 bytes compose a run.
+The highest bit indicates repetitions, the remaining 15 bit indicate the entity ID.
+If the highest bit was set, the pixel is repeated 1+n times, where n is the following
+byte.
+
+Metadata is stored similarly: first a block gives the length of each entry; then the
+serialized entries are given. Entries are UTF-8 encoded, are *not* 0 terminated, and
+may include tab characters to separate columns. The exact column layout is not
+specified in this file format.
 
 ## Visualization
 
