@@ -9,8 +9,8 @@ The basic principle is simple:
 - to geocode coordinates, look them up in the map
 
 However, things with OSM are not as easy as one may expect:
-- OSM is a ''lot'' of data. It may use up all your memory easily.
-  We are talking of 2.7 ''billion'' nodes for the planet file,
+- OSM is a *lot* of data. It may use up all your memory easily.
+  We are talking of 2.7 *billion* nodes for the planet file,
   and 270 million ways and 3.1 million relations.
   32 bits are not enough to store the IDs.
 - The dump file is not well suited for random access. Instead, you
@@ -26,7 +26,7 @@ multiple times (to large temporary files) - I decided to design my approach arou
 reading the input data multiple times instead, even if this means re-reading data
 unnecessarily, at the benefit of not having to write large temporary files.
 
-## The approach
+## OSM Data Extraction
 
 We do a multi-pass process.
 
@@ -43,17 +43,17 @@ then can output the polygons for each relation, along with some metadata.
 On my system, the each pass takes about 2 minutes (reading from a network share;
 likely a lot faster if I had stored the source file on my SSD).
 
-## Data structures
+### Data Structures
 
 We use Goldman-Sachs collections to conserve memory. These classes are excellent
-hashmaps for ''primitive'' data types. For nodes, we also use a two level hashmap
+hashmaps for *primitive* data types. For nodes, we also use a two level hashmap
 with prefix compression, since node ids were given in sequence not randomly (and thus
 have a lot of common prefixes - in particular, the first 20+ bits of each id are usually 0).
 
 Since our desired output resolution is much less than 0.01 degree, we also encode
 each coordinate approximately using a single integer.
 
-## Hints
+### Implementation Notes
 
 While osmosis --used-way --used-node did not work for me with tag filters, it
 apparently worked just fine without. Using these filters can reduce the
@@ -61,3 +61,22 @@ planet file substantially, to about 13% of the planet file. This is worth
 doing as a preprocessing step. It reduces the node count from 2.1 billion to
 "just" 460 million, the number of ways to 17 million (the number of relations
 remains unchanged, obviously). This way, 8 GB of RAM should be enough.
+
+As of now, you *will* need to use a Debian Linux system.
+Some of the libraries are not available on Maven central, so I had to put
+system paths (have a look at the pom.xml, for what you need).
+
+## Index construction
+
+The index essentially is a large pixmap referencing metadata from OSM.
+
+Rendering is currently done via JavaFX, so you will also need to have a UI for
+building an index. Unfortunately, this is also rather slow (10-30 minutes,
+depending on the desired resolution and number of polygons to render). However,
+we needed an API that can render polygons with the even-odd rule and antialiasing,
+and the java-gnome Cairo API wouldn't allow us access the resulting bitmaps without
+writing them to disk as PNG.
+
+## Visualization
+
+The index construction will also produce a .png viusalizing the map.

@@ -5,21 +5,38 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
-import org.freedesktop.cairo.Context;
-import org.freedesktop.cairo.Format;
-import org.freedesktop.cairo.ImageSurface;
-import org.gnome.gtk.Gtk;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.collections.ObservableList;
+import javafx.embed.swing.SwingFXUtils;
+import javafx.scene.Group;
+import javafx.scene.Scene;
+import javafx.scene.image.PixelReader;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.FillRule;
+import javafx.scene.shape.LineTo;
+import javafx.scene.shape.MoveTo;
+import javafx.scene.shape.Path;
+import javafx.scene.shape.PathElement;
+import javafx.stage.Stage;
+
+import javax.imageio.ImageIO;
 
 import com.gs.collections.impl.list.mutable.primitive.FloatArrayList;
 import com.gs.collections.impl.set.mutable.UnifiedSet;
 
-public class BuildIndex {
+public class BuildIndex extends Application {
 	File infile, oufile;
 
 	Pattern coordPattern = Pattern
@@ -28,20 +45,46 @@ public class BuildIndex {
 	private UnifiedSet<Entity> entities;
 
 	// Minimum size of objects to draw
-	float minlw = .1f, minlh = .1f;
+	double minsize;
 
-	public BuildIndex(String infile, String outfile) {
+	// Viewport
+	double xcover, xshift, ycover, yshift;
+
+	// Image size
+	int width, height;
+
+	// Scaling factors
+	double xscale, yscale;
+
+	public BuildIndex() {
 		super();
+		String infile = "/nfs/multimedia/OpenStreetMap/20150126/administrative-polys.tsv.gz";
 		this.infile = new File(infile);
-		this.oufile = new File(outfile);
+		// this.oufile = new File(outfile);
 		this.entities = new UnifiedSet<>();
+
+		// Viewport on map
+		xcover = 360.;
+		xshift = 180;
+		ycover = 140.;
+		yshift = 80;
+		double mult = 1. / 0.05; // 1/degree resolution.
+		this.width = (int) Math.ceil(xcover * mult);
+		this.height = (int) Math.ceil(ycover * mult);
+		this.xscale = width / xcover; // approx. 1. / mult
+		this.yscale = height / ycover; // approx. 1. / mult
+
+		double pixel_minsize = 4; // Minimum number of pixels (BB)
+		this.minsize = pixel_minsize / mult;
 	}
 
-	private void run() {
+	@Override
+	public void start(Stage stage) throws Exception {
 		Matcher m = coordPattern.matcher("");
 		StringBuilder buf = new StringBuilder();
 		FloatArrayList points = new FloatArrayList();
 		BoundingBox bb = new BoundingBox();
+		int polycount = 0;
 		// Everybody just "loves" such Java constructs:
 		try (BufferedReader b = new BufferedReader(new InputStreamReader(
 				new GZIPInputStream(new FileInputStream(infile))))) {
@@ -68,7 +111,7 @@ public class BuildIndex {
 						++nummeta;
 					}
 				}
-				if (bb.width() < minlw || bb.height() < minlh) {
+				if (bb.size() < minsize) {
 					continue;
 				}
 				Entity ent = new Entity(buf.toString());
@@ -76,37 +119,144 @@ public class BuildIndex {
 				if (exist != null) {
 					exist.bb.update(bb);
 					exist.polys.add(points.toArray());
+					++polycount;
 				} else {
 					entities.add(ent);
 					ent.bb = new BoundingBox(bb);
 					ent.polys = new LinkedList<>();
 					ent.polys.add(points.toArray());
+					++polycount;
 				}
 			}
+
+			System.err.println("Have " + entities.size() + " entities, "
+					+ polycount + " polgons.");
+
+			render(stage);
 		} catch (IOException e) {
 			// FIXME: add logging.
 			e.printStackTrace();
 		}
+		Platform.exit();
+	}
 
-		Gtk.init(new String[] {});
-		ImageSurface surface = new ImageSurface(Format.ARGB32, 3600, 1800);
-		Context ctx = new Context(surface);
-		{
-			double xcover = 360., xshift = 0;
-			double ycover = 140., yshift = 80;
-			double mult = 20; // 0.05 degree resolution.
-			int width = (int) Math.ceil(xcover * mult), height = (int) Math
-					.ceil(ycover * mult);
-			double xscale = width / xcover, yscale = height / ycover;
+	public void render(Stage stage) {
+		Group rootGroup = new Group();
+		Scene scene = new Scene(rootGroup, width, height, Color.BLACK);
+		WritableImage writableImage = null; // Buffer
 
-			ctx.translate(xshift * xscale, yshift * yscale);
-			ctx.scale(xscale, -yscale);
+		int[][] winner = new int[width][height];
+		byte[][] alphas = new byte[width][height];
+
+		long start = System.currentTimeMillis();
+		// Sort by size.
+		ArrayList<Entity> order = new ArrayList<>(entities);
+		Collections.sort(order);
+		final int div = order.size() / 10; // Logging
+		int c = 0;
+		for (Entity e : order) {
+			++c;
+			if (c % div == 0) {
+				System.err.format("%d%%\n", (c * 100) / order.size());
+			}
+			if (e.polys.size() <= 0) {
+				continue;
+			}
+			Path path = new Path();
+			ObservableList<PathElement> elems = path.getElements();
+			for (float[] f : e.polys) {
+				assert (f.length > 1);
+				elems.add(new MoveTo((f[0] + xshift) * xscale, (f[1] - yshift)
+						* -yscale));
+				for (int i = 2, l = f.length; i < l; i += 2) {
+					elems.add(new LineTo((f[i] + xshift) * xscale,
+							(f[i + 1] - yshift) * -yscale));
+				}
+			}
+			path.setStroke(Color.TRANSPARENT);
+			path.setFill(Color.WHITE);
+			path.setFillRule(FillRule.EVEN_ODD);
+
+			rootGroup.getChildren().add(path);
+
+			// Area to inspect
+			int xmin = Math.max(0,
+					(int) Math.floor((e.bb.lonmin + xshift) * xscale));
+			int xmax = Math.min(width - 1,
+					(int) Math.ceil((e.bb.lonmax + xshift) * xscale));
+			// Note: y axis is reversed!
+			int ymax = Math.min(height - 1,
+					(int) Math.floor((e.bb.latmin - yshift) * -yscale));
+			int ymin = Math.max(0,
+					(int) Math.ceil((e.bb.latmax - yshift) * -yscale));
+			// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
+
+			writableImage = scene.snapshot(writableImage);
+			rootGroup.getChildren().remove(path);
+
+			PixelReader reader = writableImage.getPixelReader();
+			for (int y = ymin; y <= ymax; y++) {
+				for (int x = xmin; x <= xmax; x++) {
+					int col = reader.getArgb(x, y);
+					int alpha = (col & 0xFF);
+					// Ignore cover less than 10%
+					alpha -= 0x19;
+					// Clip value range to positive bytes,
+					// i.E. always overwrite at a coverage of >=60%
+					alpha = alpha > 0x7F ? 0x7F : alpha;
+					if (alpha > 0 && alpha >= alphas[x][y]) {
+						alphas[x][y] = (byte) alpha;
+						winner[x][y] = c;
+					}
+				}
+			}
+		}
+		long end = System.currentTimeMillis();
+		System.err.println("Time: " + (end - start));
+		visualize(order.size(), winner);
+	}
+
+	/**
+	 * Visualize the map.
+	 * 
+	 * @param Maximum
+	 *            color
+	 * @param winner
+	 *            Winners array
+	 */
+	public void visualize(int max, int[][] winner) {
+		// Randomly assign colors for visualization:
+		Random r = new Random();
+		int[] cols = new int[max + 1];
+		for (int i = 1; i < cols.length; i++) {
+			cols[i] = r.nextInt(0x1000000) | 0xFF000000;
+		}
+		try {
+			WritableImage writableImage = new WritableImage(width, height);
+			PixelWriter writer = writableImage.getPixelWriter();
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					writer.setArgb(x, y, cols[winner[x][y]]);
+				}
+			}
+			ImageIO.write(SwingFXUtils.fromFXImage(writableImage, null), "png",
+					new File("output.png"));
+		} catch (IOException e) {
+			// TODO Use logging
+			e.printStackTrace();
 		}
 	}
 
-	public static class Entity {
+	/**
+	 * An entity on the map.
+	 * 
+	 * @author Erich Schubert
+	 */
+	public static class Entity implements Comparable<Entity> {
+		/** Index key (description) */
 		final String key;
 
+		/** Bounding box */
 		BoundingBox bb;
 
 		List<float[]> polys;
@@ -129,6 +279,14 @@ public class BuildIndex {
 				return false;
 			}
 			return key.equals(((Entity) obj).key);
+		}
+
+		/**
+		 * Order descending by size.
+		 */
+		@Override
+		public int compareTo(Entity o) {
+			return Double.compare(o.bb.size(), bb.size());
 		}
 	}
 
@@ -195,6 +353,15 @@ public class BuildIndex {
 		}
 
 		/**
+		 * Area (unprojected) of the bounding box.
+		 * 
+		 * @return Area
+		 */
+		public double size() {
+			return (lonmax - lonmin) * (latmax - latmin);
+		}
+
+		/**
 		 * Reset the bounding box.
 		 */
 		public void reset() {
@@ -234,7 +401,6 @@ public class BuildIndex {
 	}
 
 	public static void main(String[] args) {
-		new BuildIndex(args[0], args[1]).run();
+		launch(args);
 	}
-
 }

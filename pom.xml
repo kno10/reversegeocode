@@ -7,8 +7,8 @@
 	<name>Simple but fast reverse geocoding up to city granularitiy level</name>
 
 	<properties>
-		<maven.compiler.source>1.7</maven.compiler.source>
-		<maven.compiler.target>1.7</maven.compiler.target>
+		<maven.compiler.source>1.8</maven.compiler.source>
+		<maven.compiler.target>1.8</maven.compiler.target>
 	</properties>
 
 	<dependencies>
@@ -29,17 +29,16 @@
 			<systemPath>/usr/share/maven-repo/com/google/protobuf/protobuf-java/2.6.1/protobuf-java-2.6.1.jar</systemPath>
 		</dependency>
 		<dependency>
-			<!-- There doesn't appear to be a Maven convention on this artifact -->
-			<groupId>net.sourceforge.java-gnome</groupId>
-			<artifactId>java-gnome</artifactId>
-			<version>4.1</version>
-			<scope>system</scope>
-			<systemPath>/usr/share/java/gtk-4.1.jar</systemPath>
-		</dependency>
-		<dependency>
 			<groupId>com.goldmansachs</groupId>
 			<artifactId>gs-collections</artifactId>
 			<version>5.1.0</version>
+		</dependency>
+		<dependency>
+			<groupId>javafx</groupId>
+			<artifactId>jfxrt</artifactId>
+			<version>${java.version}</version>
+			<scope>system</scope>
+			<systemPath>${java.home}/lib/ext/jfxrt.jar</systemPath>
 		</dependency>
 	</dependencies>
 </project>
