@@ -33,6 +33,8 @@ import crosby.binary.file.BlockInputStream;
  * Theoretically, you could use Osmosis --used-way --used-node for this, but
  * this produced incomplete results for me, unfortunately.
  * 
+ * TODO: use hierarchy information to always generate e.g. country information
+ * 
  * @author Erich Schubert
  */
 public class ParseOSM {
@@ -577,8 +579,9 @@ public class ParseOSM {
 		}
 
 		public class Metadata {
-			String levl = null, name = null, inam = null, wiki = null,
-					wikd = null, boun = null, coun = null, plac = null;
+			String levl = null, name = null, inam = null, enam = null,
+					wiki = null, wikd = null, boun = null, coun = null,
+					plac = null;
 
 			public void reset() {
 				levl = null;
@@ -619,26 +622,18 @@ public class ParseOSM {
 					levl = val;
 					break;
 				case "name":
-					name = val;
-					break;
 				case "place_name":
-					name = (name == null) ? val : name;
+					name = val;
 					break;
 				case "int_name":
 					inam = val;
 					break;
 				case "name:en":
+				case "place_name:en":
+					enam = val;
 					inam = (inam == null) ? val : inam;
 					break;
-				case "wikipedia":
-					wiki = val;
-					break;
-				case "wikipedia:en":
-					wiki = (wiki == null) ? val : wiki;
-					break;
-				case "wikidata":
-					wikd = val;
-					break;
+				// Country
 				case "is_in:country_code":
 					coun = val;
 					break;
@@ -652,6 +647,7 @@ public class ParseOSM {
 				case "is_in:iso_3166_2":
 					coun = (coun == null) ? val.substring(0, 2) : coun;
 					break;
+				// Place is a type information
 				case "place":
 				case "de:place":
 				case "boundary_type":
@@ -659,6 +655,16 @@ public class ParseOSM {
 					break;
 				case "boundary":
 					boun = val;
+					break;
+				// Wikipedia and WikiData
+				case "wikipedia":
+					wiki = val;
+					break;
+				case "wikipedia:en":
+					wiki = (wiki == null) ? val : wiki;
+					break;
+				case "wikidata":
+					wikd = val;
 					break;
 				}
 			}
@@ -671,6 +677,7 @@ public class ParseOSM {
 			public void append(StringBuilder buf) {
 				buf.append(name);
 				buf.append('\t').append(inam == null ? name : inam);
+				buf.append('\t').append(enam == null ? name : enam);
 				buf.append('\t').append(coun == null ? "" : coun);
 				buf.append('\t').append(plac == null ? "" : plac);
 				buf.append('\t').append(wiki == null ? "" : wiki);

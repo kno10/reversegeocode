@@ -79,10 +79,8 @@ we needed an API that can render polygons with the even-odd rule and antialiasin
 and the java-gnome Cairo API wouldn't allow us access the resulting bitmaps without
 writing them to disk as PNG.
 
-Unfortunately, this also puts a limit to the maximum resolution. The default JavaFX
-renderer seems to max out at 8192 "texture size", so you cannot reach 0.04 degree
-resolution while using the full map. You will have to either use some strategy to not
-draw the whole map at once with JavaFX, or restrict the viewport.
+The JavaFX renderer has a texture limit of 8192x8192 - if we want a higher resolution,
+we need to draw multiple patches, and combine them.
 
 ### File Format
 

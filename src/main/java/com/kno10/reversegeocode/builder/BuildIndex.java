@@ -40,9 +40,6 @@ import com.gs.collections.impl.list.mutable.primitive.FloatArrayList;
 import com.gs.collections.impl.set.mutable.UnifiedSet;
 
 public class BuildIndex extends Application {
-	// Resolution of the input coordinates
-	private static final double INPUT_RESOLUION = 0.01;
-
 	File infile, oufile;
 
 	Pattern coordPattern = Pattern
@@ -64,10 +61,6 @@ public class BuildIndex extends Application {
 
 	public BuildIndex() {
 		super();
-		String infile = "/nfs/multimedia/OpenStreetMap/20150126/administrative-polys.tsv.gz";
-		String outfile = "osm-20150126.bin";
-		this.infile = new File(infile);
-		this.oufile = new File(outfile);
 		this.entities = new UnifiedSet<>();
 
 		// Viewport on map
@@ -75,14 +68,22 @@ public class BuildIndex extends Application {
 		xshift = 180;
 		ycover = 140.;
 		yshift = 60;
-		double mult = 1. / 0.05; // 1/degree resolution.
+		double mult = 1. / 0.01; // 1/degree resolution.
 		this.width = (int) Math.ceil(xcover * mult);
 		this.height = (int) Math.ceil(ycover * mult);
 		this.xscale = width / xcover; // approx. 1. / mult
 		this.yscale = height / ycover; // approx. 1. / mult
 
-		double pixel_minsize = 4; // Minimum number of pixels (BB)
+		double pixel_minsize = 20; // Minimum number of pixels (BB)
 		this.minsize = pixel_minsize / mult;
+	}
+
+	@Override
+	public void init() throws Exception {
+		super.init();
+		List<String> unnamed = getParameters().getUnnamed();
+		this.infile = new File(unnamed.get(0));
+		this.oufile = new File(unnamed.get(1));
 	}
 
 	@Override
@@ -153,11 +154,10 @@ public class BuildIndex extends Application {
 	}
 
 	public void render(Stage stage) {
+		final int blocksize = 1024;
 		Group rootGroup = new Group();
-		Scene scene = new Scene(rootGroup, width, height, Color.BLACK);
+		Scene scene = new Scene(rootGroup, blocksize, blocksize, Color.BLACK);
 		WritableImage writableImage = null; // Buffer
-
-		double strokewidth = INPUT_RESOLUION * .5 * xscale;
 
 		int[][] winner = new int[height][width];
 		byte[][] alphas = new byte[height][width];
@@ -173,59 +173,49 @@ public class BuildIndex extends Application {
 		for (Entity e : order) {
 			++c;
 			if (c % div == 0) {
-				System.err.format("Drawing %.0f%%\n", (c * 100.) / order.size());
+				System.err
+						.format("Drawing %.0f%%\n", (c * 100.) / order.size());
 			}
 			if (e.polys.size() <= 0) {
 				continue;
 			}
-			// Implementation note: we are drawing upside down.
-			elems.clear();
-			for (float[] f : e.polys) {
-				assert (f.length > 1);
-				elems.add(new MoveTo((f[0] + xshift) * xscale, //
-						(f[1] + yshift) * yscale));
-				for (int i = 2, l = f.length; i < l; i += 2) {
-					elems.add(new LineTo((f[i] + xshift) * xscale, //
-							(f[i + 1] + yshift) * yscale));
-				}
-			}
-			// path.setStrokeType(StrokeType.INSIDE);
-			path.setStroke(Color.WHITE);
-			path.setStrokeWidth(strokewidth);
-			path.setFill(Color.WHITE);
-			path.setFillRule(FillRule.EVEN_ODD);
-
-			rootGroup.getChildren().add(path);
-
 			// Area to inspect
 			int xmin = Math.max(0,
-					(int) Math.floor((e.bb.lonmin + xshift) * xscale));
-			int xmax = Math.min(width - 1,
-					(int) Math.ceil((e.bb.lonmax + xshift) * xscale));
+					(int) Math.floor((e.bb.lonmin + xshift) * xscale) - 1);
+			int xmax = Math.min(width,
+					(int) Math.ceil((e.bb.lonmax + xshift) * xscale) + 1);
 			int ymin = Math.max(0,
-					(int) Math.ceil((e.bb.latmin + yshift) * yscale));
-			int ymax = Math.min(height - 1,
-					(int) Math.floor((e.bb.latmax + yshift) * yscale));
+					(int) Math.ceil((e.bb.latmin + yshift) * yscale) - 1);
+			int ymax = Math.min(height,
+					(int) Math.floor((e.bb.latmax + yshift) * yscale) + 1);
 			// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
+			for (int x1 = xmin; x1 < xmax; x1 += blocksize) {
+				int x2 = Math.min(x1 + blocksize, xmax);
+				for (int y1 = ymin; y1 < ymax; y1 += blocksize) {
+					int y2 = Math.min(y1 + blocksize, ymax);
 
-			writableImage = scene.snapshot(writableImage);
-			rootGroup.getChildren().remove(path);
+					// Implementation note: we are drawing upside down.
+					elems.clear();
+					for (float[] f : e.polys) {
+						assert (f.length > 1);
+						elems.add(new MoveTo((f[0] + xshift) * xscale - x1, //
+								(f[1] + yshift) * yscale - y1));
+						for (int i = 2, l = f.length; i < l; i += 2) {
+							elems.add(new LineTo((f[i] + xshift) * xscale - x1, //
+									(f[i + 1] + yshift) * yscale - y1));
+						}
+					}
+					path.setStroke(Color.TRANSPARENT);
+					path.setFill(Color.WHITE);
+					path.setFillRule(FillRule.EVEN_ODD);
 
-			PixelReader reader = writableImage.getPixelReader();
-			for (int y = ymin; y <= ymax; y++) {
-				for (int x = xmin; x <= xmax; x++) {
-					int col = reader.getArgb(x, y);
-					int alpha = (col & 0xFF);
-					// Always ignore cover less than 10%
-					if (alpha < 0x19) {
-						continue;
-					}
-					// Clip value range to positive bytes,
-					alpha = alpha > 0x7F ? 0x7F : alpha;
-					if (alpha == 0x7F || (alpha > 0 && alpha >= alphas[y][x])) {
-						alphas[y][x] = (byte) alpha;
-						winner[y][x] = c;
-					}
+					rootGroup.getChildren().add(path);
+
+					writableImage = scene.snapshot(writableImage);
+					rootGroup.getChildren().remove(path);
+
+					transferPixels(writableImage, x1, x2, y1, y2, winner, c,
+							alphas);
 				}
 			}
 		}
@@ -234,6 +224,27 @@ public class BuildIndex extends Application {
 
 		buildIndex(order, winner);
 		visualize(order.size(), winner);
+	}
+
+	public void transferPixels(WritableImage img, int x1, int x2, int y1,
+			int y2, int[][] winner, int c, byte[][] alphas) {
+		PixelReader reader = img.getPixelReader();
+		for (int y = y1; y < y2; y++) {
+			for (int x = x1; x < x2; x++) {
+				int col = reader.getArgb(x - x1, y - y1);
+				int alpha = (col & 0xFF);
+				// Always ignore cover less than 10%
+				if (alpha < 0x19) {
+					continue;
+				}
+				// Clip value range to positive bytes,
+				alpha = alpha > 0x7F ? 0x7F : alpha;
+				if (alpha == 0x7F || (alpha > 0 && alpha >= alphas[y][x])) {
+					alphas[y][x] = (byte) alpha;
+					winner[y][x] = c;
+				}
+			}
+		}
 	}
 
 	private void buildIndex(ArrayList<Entity> order, int[][] winner) {
