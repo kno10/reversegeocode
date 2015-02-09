@@ -9,7 +9,7 @@ The basic principle is simple:
 - to geocode coordinates, look them up in the map
 
 The map will look roughly like this (this is, in fact, a scaled down map as produced by
-this tool when visualization is enabled):
+this tool when visualization is enabled - the full image has 36000x14000 pixels):
 
 ![Example visualization](visualization.png)
 
@@ -134,10 +134,19 @@ The index construction will also produce a .png visualizing the map, as shown ab
 I am aware there are areas where the data is not yet very good. For example in Portugal,
 there is little detailed information. You are welcome to contribute data: just contribute
 administrative boundaries to [OpenStreetMap](http://www.openstreetmap.org/)!
-For example for Portugal, there is a
-[project to add administrative boundaries](http://wiki.openstreetmap.org/wiki/WikiProject_Portugal/Divis%C3%B5es_Administrativas/Lista_de_Divis%C3%B5es_Administrativas),
+For example there is a project underway to
+[add administrative boundaries for Portugal](http://wiki.openstreetmap.org/wiki/WikiProject_Portugal/Divis%C3%B5es_Administrativas/Lista_de_Divis%C3%B5es_Administrativas),
 exactly what is needed for this index. While I'm writing this, somebody is drawing
 the polygons, which will be included in the next build. Isn't that great?
+
+## TODO
+
+1. The actual query code has not yet been written. But that is the easiest part, I will add it next.
+2. As is, metadata is not aggregated over the hierarchy yet. So the index may know that a location
+is somewhere in New York City, but it doesn't know that NYC is in the state New York, or that this
+is also part of the United State of America. This sounds like an easy job at first, but once you realize
+that the way administrative regions are organized varies around the world, it's not that easy anymore...
+Contributions are welcome!
 
 ## Licensing
 
