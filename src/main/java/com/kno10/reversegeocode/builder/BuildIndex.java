@@ -1,5 +1,24 @@
 package com.kno10.reversegeocode.builder;
 
+/*
+ * Copyright (C) 2015, Erich Schubert
+ * Ludwig-Maximilians-Universität München
+ * Lehr- und Forschungseinheit für Datenbanksysteme
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -329,6 +348,7 @@ public class BuildIndex extends Application {
 			// Write the number of indexes
 			os.writeShort(c);
 
+			LOG.warn("Position of pixmap: {}", os.size());
 			// Part 2: PIXMAP rows
 			// Encode the rows
 			byte[][] rows = new byte[viewport.height][];
@@ -346,19 +366,22 @@ public class BuildIndex extends Application {
 			}
 			rows = null;
 
+			LOG.warn("Position of metadata: {}", os.size());
 			// Part 3: METADATA
 			byte[][] metadata = new byte[c][];
 			metadata[0] = "Earth".getBytes("UTF-8");
 			int c2 = 1;
 			for (int i = 1; i < map.length; i++) {
-				if (map[i] > -1) {
-					metadata[c2++] = order.get(i - 1).key.getBytes("UTF-8");
+				if (map[i] <= -1) {
+					continue;
 				}
+				metadata[c2++] = order.get(i - 1).key.getBytes("UTF-8");
 			}
 			assert (c2 == c);
 			// Write the metadata header table
-			for (int y = 0; y < viewport.height; y++) {
-				os.writeShort(metadata[y].length);
+			for (byte[] row : metadata) {
+				assert (row.length < 0x8000);
+				os.writeShort(row.length);
 			}
 			// Write the metadata header table
 			for (byte[] row : metadata) {

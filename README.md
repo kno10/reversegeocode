@@ -129,11 +129,29 @@ may require decoding.
 
 The index construction will also produce a .png visualizing the map, as shown above.
 
+## Index Query
+
+Quering the index is easy. It requires a single class,
+[ReverseGeocoder](src/main/java/com/kno10/reversegeocode/query/ReverseGeocoder.java),
+and a data file (for example, [osm-20150126-0.01.bin](data/osm-20150126-0.01.bin)).
+
+<code>
+ReverseGeocoder rgc = new ReverseGeocoder(filename);
+// ...
+String[] metadata = rgc.lookup(longitude, latitude).split("\t");
+</code>
+
+Pay attention to the order of longitude and latitude! The order of these two values
+is inconsistent across different applications. This has been a mess historically,
+and we are not going to fix this here. We chose longitude, latitude because it seems
+more intuitive to us to use x, y as commonly seen on a map.
+
 ## Improving the Data
 
 I am aware there are areas where the data is not yet very good. For example in Portugal,
-there is little detailed information. You are welcome to contribute data: just contribute
-administrative boundaries to [OpenStreetMap](http://www.openstreetmap.org/)!
+there is little detailed information, same for Western Australia. You are welcome to
+contribute data: just contribute administrative boundaries
+to [OpenStreetMap](http://www.openstreetmap.org/)!
 For example there is a project underway to
 [add administrative boundaries for Portugal](http://wiki.openstreetmap.org/wiki/WikiProject_Portugal/Divis%C3%B5es_Administrativas/Lista_de_Divis%C3%B5es_Administrativas),
 exactly what is needed for this index. While I'm writing this, somebody is drawing
@@ -141,20 +159,23 @@ the polygons, which will be included in the next build. Isn't that great?
 
 ## TODO
 
-1. The actual query code has not yet been written. But that is the easiest part, I will add it next.
-2. As is, metadata is not aggregated over the hierarchy yet. So the index may know that a location
+1. As is, metadata is not aggregated over the hierarchy yet. So the index may know that a location
 is somewhere in New York City, but it doesn't know that NYC is in the state New York, or that this
 is also part of the United State of America. This sounds like an easy job at first, but once you realize
 that the way administrative regions are organized varies around the world, it's not that easy anymore...
+2. OpenStreetMap data is a bit tricky, and the code extracting the metadata could use more finetuning,
+as well as more consistent use of tags on OSM itself.
+
 Contributions are welcome!
 
 ## Licensing
 
-The index construction code is AGPL-3 licensed (see [LICENSE](LICENSE)).
+The index ''construction'' code is AGPL-3 licensed (see [LICENSE](LICENSE)).
 I am aware this is a rather restrictive license, but I believe in Copyleft and the GPL.
 
-The data is derived from OpenStreetmap, and thus under the
+The index ''query'' code is using the liberal BSD 2-clause license.
+
+The ''data'' is derived from OpenStreetmap, and thus under the
 [Open Data Commons Open Database License](http://www.openstreetmap.org/copyright)
 and you are required to give credit as "© OpenStreetMap contributors".
 
-The index query code will be licensed more liberally, to make it easy to embed.
