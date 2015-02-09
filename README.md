@@ -32,6 +32,22 @@ multiple times (to large temporary files) - I decided to design my approach arou
 reading the input data multiple times instead, even if this means re-reading data
 unnecessarily, at the benefit of not having to write large temporary files.
 
+## Index Query
+
+Quering the index is easy. It requires a single class,
+[ReverseGeocoder](src/main/java/com/kno10/reversegeocode/query/ReverseGeocoder.java),
+and a data file (for example, [osm-20150126-0.01.bin](data/osm-20150126-0.01.bin) or
+if you prefer a coarser resolution [osm-20150126-0.02.bin](data/osm-20150126-0.02.bin)).
+
+    ReverseGeocoder rgc = new ReverseGeocoder(filename);
+    // ...
+    String[] metadata = rgc.lookup(longitude, latitude).split("\t");
+
+Pay attention to the order of longitude and latitude! The order of these two values
+is inconsistent across different applications. This has been a mess historically,
+and we are not going to fix this here. We chose longitude, latitude because it seems
+more intuitive to us to use x, y as commonly seen on a map.
+
 ## OSM Data Extraction
 
 We do a multi-pass process.
@@ -128,23 +144,6 @@ may require decoding.
 ## Visualization
 
 The index construction will also produce a .png visualizing the map, as shown above.
-
-## Index Query
-
-Quering the index is easy. It requires a single class,
-[ReverseGeocoder](src/main/java/com/kno10/reversegeocode/query/ReverseGeocoder.java),
-and a data file (for example, [osm-20150126-0.01.bin](data/osm-20150126-0.01.bin)).
-
-<code>
-ReverseGeocoder rgc = new ReverseGeocoder(filename);
-// ...
-String[] metadata = rgc.lookup(longitude, latitude).split("\t");
-</code>
-
-Pay attention to the order of longitude and latitude! The order of these two values
-is inconsistent across different applications. This has been a mess historically,
-and we are not going to fix this here. We chose longitude, latitude because it seems
-more intuitive to us to use x, y as commonly seen on a map.
 
 ## Improving the Data
 
