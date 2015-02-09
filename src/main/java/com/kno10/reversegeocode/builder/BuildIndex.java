@@ -36,46 +36,46 @@ import javafx.stage.Stage;
 
 import javax.imageio.ImageIO;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.gs.collections.impl.list.mutable.primitive.FloatArrayList;
 import com.gs.collections.impl.set.mutable.UnifiedSet;
 
+/**
+ * Build and encode the lookup index.
+ * 
+ * This is currently implemented using JavaFX to facilitate the polygon drawing.
+ * 
+ * TODO: make parameters configurable.
+ * 
+ * @author Erich Schubert
+ */
 public class BuildIndex extends Application {
-	File infile, oufile;
+	/** Class logger */
+	private static final Logger LOG = LoggerFactory.getLogger(BuildIndex.class);
 
+	/** Input and output file names */
+	File infile, oufile, imfile;
+
+	/** Pattern for matching coordinates */
 	Pattern coordPattern = Pattern
-			.compile("^(-?\\d+(?:\\.\\d*)),(-?\\d+(?:\\.\\d*))$");
+			.compile("(?<=\t)(-?\\d+(?:\\.\\d*)),(-?\\d+(?:\\.\\d*))(?=\t|$)");
 
+	/** Entities read from the file */
 	private UnifiedSet<Entity> entities;
 
-	// Minimum size of objects to draw
+	/** Minimum size of objects to draw */
 	double minsize;
 
-	// Viewport
-	double xcover, xshift, ycover, yshift;
+	/** Viewport of the map */
+	Viewport viewport;
 
-	// Image size
-	int width, height;
-
-	// Scaling factors
-	double xscale, yscale;
-
+	/**
+	 * Constructor.
+	 */
 	public BuildIndex() {
 		super();
-		this.entities = new UnifiedSet<>();
-
-		// Viewport on map
-		xcover = 360.;
-		xshift = 180;
-		ycover = 140.;
-		yshift = 60;
-		double mult = 1. / 0.01; // 1/degree resolution.
-		this.width = (int) Math.ceil(xcover * mult);
-		this.height = (int) Math.ceil(ycover * mult);
-		this.xscale = width / xcover; // approx. 1. / mult
-		this.yscale = height / ycover; // approx. 1. / mult
-
-		double pixel_minsize = 20; // Minimum number of pixels (BB)
-		this.minsize = pixel_minsize / mult;
 	}
 
 	@Override
@@ -84,47 +84,56 @@ public class BuildIndex extends Application {
 		List<String> unnamed = getParameters().getUnnamed();
 		this.infile = new File(unnamed.get(0));
 		this.oufile = new File(unnamed.get(1));
+		this.imfile = unnamed.size() > 2 ? new File(unnamed.get(2)) : null;
+
+		this.entities = new UnifiedSet<>();
+
+		// Viewport on map
+		double resolution = 0.01;
+		this.viewport = new Viewport(360., 140., 180., 60., resolution);
+
+		double pixel_minsize = 6; // Minimum number of pixels (BB)
+		this.minsize = pixel_minsize * resolution;
 	}
 
 	@Override
 	public void start(Stage stage) throws Exception {
+		// Preallocate objects (will be reset and reused!)
 		Matcher m = coordPattern.matcher("");
-		StringBuilder buf = new StringBuilder();
 		FloatArrayList points = new FloatArrayList();
 		BoundingBox bb = new BoundingBox();
+
 		int polycount = 0, lines = 0;
-		// Everybody just "loves" such Java constructs:
+		// Everybody just "loves" such Java constructs...
 		try (BufferedReader b = new BufferedReader(new InputStreamReader(
 				new GZIPInputStream(new FileInputStream(infile))))) {
 			long start = System.currentTimeMillis();
 			String line = null;
 			while ((line = b.readLine()) != null) {
 				++lines;
-				buf.delete(0, buf.length()); // Reset the buffer
 				points.clear();
 				bb.reset();
-				String[] cols = line.split("\t");
-				int nummeta = 0;
-				for (int i = 0; i < cols.length; i++) {
-					if (m.reset(cols[i]).matches()) {
-						float lon = Float.parseFloat(m.group(1));
-						float lat = Float.parseFloat(m.group(2));
-						points.add(lon);
-						points.add(lat);
-						bb.update(lon, lat);
-					} else {
-						assert (points.isEmpty());
-						if (nummeta > 0) {
-							buf.append('\t');
-						}
-						buf.append(cols[i]);
-						++nummeta;
+
+				String meta = null;
+				m.reset(line);
+				while (m.find()) {
+					if (meta == null) {
+						meta = line.substring(0, m.start() - 1);
 					}
+					float lon = Float.parseFloat(m.group(1));
+					float lat = Float.parseFloat(m.group(2));
+					points.add(lon);
+					points.add(lat);
+					bb.update(lon, lat);
+				}
+				if (points.size() == 0) {
+					LOG.warn("Line was not matched: {}", line);
+					continue;
 				}
 				if (bb.size() < minsize) {
 					continue;
 				}
-				Entity ent = new Entity(buf.toString());
+				Entity ent = new Entity(meta);
 				Entity exist = entities.get(ent);
 				if (exist != null) {
 					exist.bb.update(bb);
@@ -140,54 +149,59 @@ public class BuildIndex extends Application {
 			}
 
 			long end = System.currentTimeMillis();
-			System.err.println("Parsing time: " + (end - start) + " ms");
-			System.err.println("Read " + lines + " lines, kept "
-					+ entities.size() + " entities, " + polycount
-					+ " polygons.");
+			LOG.info("Parsing time: {} ms", end - start);
+			LOG.info("Read {} lines, kept {} entities, {} polygons", //
+					lines, entities.size(), polycount);
 
 			render(stage);
 		} catch (IOException e) {
-			// FIXME: add logging.
-			e.printStackTrace();
+			LOG.error("IO Error", e);
 		}
 		Platform.exit();
 	}
 
+	/**
+	 * Render the polygons onto the "winner" map.
+	 * 
+	 * @param stage
+	 *            Empty JavaFX stage used for rendering
+	 */
 	public void render(Stage stage) {
-		final int blocksize = 1024;
+		final int blocksize = 256;
 		Group rootGroup = new Group();
 		Scene scene = new Scene(rootGroup, blocksize, blocksize, Color.BLACK);
 		WritableImage writableImage = null; // Buffer
 
-		int[][] winner = new int[height][width];
-		byte[][] alphas = new byte[height][width];
+		int[][] winner = new int[viewport.height][viewport.width];
+		byte[][] alphas = new byte[viewport.height][viewport.width];
 
 		long start = System.currentTimeMillis();
 		// Sort by size.
 		ArrayList<Entity> order = new ArrayList<>(entities);
 		Collections.sort(order);
+
+		int entnum = 0;
 		final int div = order.size() / 10; // Logging
-		int c = 0;
 		Path path = new Path();
 		ObservableList<PathElement> elems = path.getElements();
 		for (Entity e : order) {
-			++c;
-			if (c % div == 0) {
-				System.err
-						.format("Drawing %.0f%%\n", (c * 100.) / order.size());
+			++entnum; // Entity number
+			if (entnum % div == 0) {
+				LOG.info("Rendering {}%",
+						(int) ((entnum * 100.) / order.size()));
 			}
 			if (e.polys.size() <= 0) {
 				continue;
 			}
 			// Area to inspect
 			int xmin = Math.max(0,
-					(int) Math.floor((e.bb.lonmin + xshift) * xscale) - 1);
-			int xmax = Math.min(width,
-					(int) Math.ceil((e.bb.lonmax + xshift) * xscale) + 1);
+					(int) Math.floor(viewport.projLon(e.bb.lonmin)) - 1);
+			int xmax = Math.min(viewport.width,
+					(int) Math.ceil(viewport.projLon(e.bb.lonmax)) + 1);
 			int ymin = Math.max(0,
-					(int) Math.ceil((e.bb.latmin + yshift) * yscale) - 1);
-			int ymax = Math.min(height,
-					(int) Math.floor((e.bb.latmax + yshift) * yscale) + 1);
+					(int) Math.ceil(viewport.projLat(e.bb.latmin)) - 1);
+			int ymax = Math.min(viewport.height,
+					(int) Math.floor(viewport.projLat(e.bb.latmax)) + 1);
 			// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
 			for (int x1 = xmin; x1 < xmax; x1 += blocksize) {
 				int x2 = Math.min(x1 + blocksize, xmax);
@@ -198,11 +212,11 @@ public class BuildIndex extends Application {
 					elems.clear();
 					for (float[] f : e.polys) {
 						assert (f.length > 1);
-						elems.add(new MoveTo((f[0] + xshift) * xscale - x1, //
-								(f[1] + yshift) * yscale - y1));
+						elems.add(new MoveTo(viewport.projLon(f[0]) - x1,
+								viewport.projLat(f[1]) - y1));
 						for (int i = 2, l = f.length; i < l; i += 2) {
-							elems.add(new LineTo((f[i] + xshift) * xscale - x1, //
-									(f[i + 1] + yshift) * yscale - y1));
+							elems.add(new LineTo(viewport.projLon(f[i]) - x1,
+									viewport.projLat(f[i + 1]) - y1));
 						}
 					}
 					path.setStroke(Color.TRANSPARENT);
@@ -210,28 +224,49 @@ public class BuildIndex extends Application {
 					path.setFillRule(FillRule.EVEN_ODD);
 
 					rootGroup.getChildren().add(path);
-
 					writableImage = scene.snapshot(writableImage);
 					rootGroup.getChildren().remove(path);
 
-					transferPixels(writableImage, x1, x2, y1, y2, winner, c,
-							alphas);
+					transferPixels(writableImage, x1, x2, y1, y2, winner,
+							entnum, alphas);
 				}
 			}
 		}
 		long end = System.currentTimeMillis();
-		System.err.println("Rendering time: " + (end - start) + " ms");
+		LOG.info("Rendering time: {} ms", end - start);
 
 		buildIndex(order, winner);
-		visualize(order.size(), winner);
+		if (imfile != null) {
+			visualize(order.size(), winner);
+		}
 	}
 
+	/**
+	 * Transfer pixels from the rendering buffer to the winner/alpha maps.
+	 * 
+	 * @param img
+	 *            Rendering buffer
+	 * @param x1
+	 *            Left
+	 * @param x2
+	 *            Right
+	 * @param y1
+	 *            Bottom
+	 * @param y2
+	 *            Top
+	 * @param winner
+	 *            Output array
+	 * @param c
+	 *            Entity number
+	 * @param alphas
+	 *            Alpha buffer
+	 */
 	public void transferPixels(WritableImage img, int x1, int x2, int y1,
 			int y2, int[][] winner, int c, byte[][] alphas) {
 		PixelReader reader = img.getPixelReader();
-		for (int y = y1; y < y2; y++) {
-			for (int x = x1; x < x2; x++) {
-				int col = reader.getArgb(x - x1, y - y1);
+		for (int y = y1, py = 0; y < y2; y++, py++) {
+			for (int x = x1, px = 0; x < x2; x++, px++) {
+				int col = reader.getArgb(px, py);
 				int alpha = (col & 0xFF);
 				// Always ignore cover less than 10%
 				if (alpha < 0x19) {
@@ -247,12 +282,20 @@ public class BuildIndex extends Application {
 		}
 	}
 
+	/**
+	 * Build the output index file.
+	 * 
+	 * @param order
+	 *            Entity order
+	 * @param winner
+	 *            Winner array
+	 */
 	private void buildIndex(ArrayList<Entity> order, int[][] winner) {
 		int[] map = new int[order.size() + 1];
 		// Scan pixels for used indexes.
-		for (int y = 0; y < height; y++) {
+		for (int y = 0; y < viewport.height; y++) {
 			int[] row = winner[y];
-			for (int x = 0; x < width; x++) {
+			for (int x = 0; x < viewport.width; x++) {
 				map[row[x]] = 1;
 			}
 		}
@@ -261,8 +304,8 @@ public class BuildIndex extends Application {
 		for (int i = 0; i < map.length; i++) {
 			map[i] = (map[i] == 0) ? -1 : c++;
 		}
-		System.err.println("Number of used entities: " + c);
-		byte[] buffer = new byte[width * 8]; // Output buffer.
+		LOG.info("Number of used entities: {}", c);
+		byte[] buffer = new byte[viewport.width * 8]; // Output buffer.
 
 		if (c > 0x8000) {
 			// In this case, you'll need to extend the file format below.
@@ -276,20 +319,25 @@ public class BuildIndex extends Application {
 			// Write a "magic" header first.
 			os.writeInt(0x6e0_6e0_00);
 			// Write dimensions
-			os.writeShort(width);
-			os.writeShort(height);
+			os.writeShort(viewport.width);
+			os.writeShort(viewport.height);
+			// Write coverage
+			os.writeFloat((float) viewport.xcover);
+			os.writeFloat((float) viewport.ycover);
+			os.writeFloat((float) viewport.xshift);
+			os.writeFloat((float) viewport.yshift);
 			// Write the number of indexes
 			os.writeShort(c);
 
 			// Part 2: PIXMAP rows
 			// Encode the rows
-			byte[][] rows = new byte[height][];
-			for (int y = 0; y < height; y++) {
+			byte[][] rows = new byte[viewport.height][];
+			for (int y = 0; y < viewport.height; y++) {
 				int len = encodeLine(winner[y], map, buffer);
 				rows[y] = Arrays.copyOf(buffer, len);
 			}
 			// Write the row header table
-			for (int y = 0; y < height; y++) {
+			for (int y = 0; y < viewport.height; y++) {
 				os.writeShort(rows[y].length);
 			}
 			// Write the row header table
@@ -309,7 +357,7 @@ public class BuildIndex extends Application {
 			}
 			assert (c2 == c);
 			// Write the metadata header table
-			for (int y = 0; y < height; y++) {
+			for (int y = 0; y < viewport.height; y++) {
 				os.writeShort(metadata[y].length);
 			}
 			// Write the metadata header table
@@ -318,10 +366,21 @@ public class BuildIndex extends Application {
 			}
 			metadata = null;
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.error("IO error writing index.", e);
 		}
 	}
 
+	/**
+	 * Encode a line of the output image map.
+	 * 
+	 * @param winner
+	 *            Image map
+	 * @param map
+	 *            Entity ID mapping
+	 * @param buffer
+	 *            Output buffer
+	 * @return Length
+	 */
 	// TODO: develop even more compact RLEs for this use case.
 	private int encodeLine(int[] winner, int[] map, byte[] buffer) {
 		int len = 0;
@@ -362,19 +421,20 @@ public class BuildIndex extends Application {
 			cols[i] = r.nextInt(0x1000000) | 0xFF000000;
 		}
 		try {
-			WritableImage writableImage = new WritableImage(width, height);
+			WritableImage writableImage = new WritableImage(viewport.width,
+					viewport.height);
 			PixelWriter writer = writableImage.getPixelWriter();
-			for (int y = 0; y < height; y++) {
-				int[] row = winner[height - 1 - y]; // Note: upside down
-				for (int x = 0; x < width; x++) {
+			for (int y = 0; y < viewport.height; y++) {
+				// Note: visualization is drawn upside down.
+				int[] row = winner[viewport.height - 1 - y];
+				for (int x = 0; x < viewport.width; x++) {
 					writer.setArgb(x, y, cols[row[x]]);
 				}
 			}
 			ImageIO.write(SwingFXUtils.fromFXImage(writableImage, null), "png",
-					new File("output.png"));
+					imfile);
 		} catch (IOException e) {
-			// TODO Use logging
-			e.printStackTrace();
+			LOG.error("IO error writing visualization.", e);
 		}
 	}
 
@@ -422,115 +482,11 @@ public class BuildIndex extends Application {
 	}
 
 	/**
-	 * Simple bounding box class for 2d data.
+	 * Launch, as JavaFX application.
 	 * 
-	 * Important note: boxes crossing the -180/+180 boundary are not supported!
-	 * 
-	 * @author Erich Schubert
+	 * @param args
+	 *            Parameters
 	 */
-	public static class BoundingBox {
-		/** Bounding box */
-		float lonmin, lonmax, latmin, latmax;
-
-		/**
-		 * Constructor.
-		 */
-		public BoundingBox() {
-			super();
-			reset();
-		}
-
-		/**
-		 * Clone constructor.
-		 */
-		public BoundingBox(BoundingBox other) {
-			super();
-			lonmin = other.lonmin;
-			lonmax = other.lonmax;
-			latmin = other.latmin;
-			latmax = other.latmax;
-		}
-
-		/**
-		 * Test whether a point is inside the bounding box.
-		 * 
-		 * @param lon
-		 *            Longitude
-		 * @param lat
-		 *            Latitude
-		 * @return {@code true} when inside
-		 */
-		public boolean inside(float lon, float lat) {
-			return lonmin <= lon && lon <= lonmax && //
-					latmin <= lat && lat <= latmax;
-		}
-
-		/**
-		 * Width of the bb in degree.
-		 * 
-		 * @return Width
-		 */
-		public float width() {
-			return lonmax - lonmin;
-		}
-
-		/**
-		 * Height of the bb in degree.
-		 * 
-		 * @return Height
-		 */
-		public float height() {
-			return latmax - latmin;
-		}
-
-		/**
-		 * Area (unprojected) of the bounding box.
-		 * 
-		 * @return Area
-		 */
-		public double size() {
-			return (lonmax - lonmin) * (latmax - latmin);
-		}
-
-		/**
-		 * Reset the bounding box.
-		 */
-		public void reset() {
-			lonmin = Float.POSITIVE_INFINITY;
-			lonmax = Float.NEGATIVE_INFINITY;
-			latmin = Float.POSITIVE_INFINITY;
-			latmax = Float.NEGATIVE_INFINITY;
-		}
-
-		/**
-		 * Update the bounding box with new data.
-		 * 
-		 * @param lon
-		 *            Longitude
-		 * @param lat
-		 *            Latitude
-		 */
-		public void update(float lon, float lat) {
-			lonmin = lon < lonmin ? lon : lonmin;
-			lonmax = lon > lonmax ? lon : lonmax;
-			latmin = lat < latmin ? lat : latmin;
-			latmax = lat > latmax ? lat : latmax;
-		}
-
-		/**
-		 * Update the bounding box with new data.
-		 * 
-		 * @param other
-		 *            Other bounding box
-		 */
-		public void update(BoundingBox other) {
-			lonmin = other.lonmin < lonmin ? other.lonmin : lonmin;
-			lonmax = other.lonmax > lonmax ? other.lonmax : lonmax;
-			latmin = other.latmin < latmin ? other.latmin : latmin;
-			latmax = other.latmax > latmax ? other.latmax : latmax;
-		}
-	}
-
 	public static void main(String[] args) {
 		launch(args);
 	}

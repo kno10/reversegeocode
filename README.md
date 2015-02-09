@@ -8,6 +8,11 @@ The basic principle is simple:
 - build a lookup map that can be stored reasonably
 - to geocode coordinates, look them up in the map
 
+The map will look roughly like this (this is, in fact, a scaled down map as produced by
+this tool when visualization is enabled):
+
+![Example visualization](visualization.png)
+
 However, things with OSM are not as easy as one may expect:
 - OSM is a *lot* of data. It may use up all your memory easily.
   We are talking of 2.7 *billion* nodes for the planet file,
@@ -17,7 +22,8 @@ However, things with OSM are not as easy as one may expect:
   need to process it in sequence. There are optimized data structures in
   the PBF file format that exploit delta compression; and strings are shared
   via a dictionary - and trust me, you don't want to process the XML dump
-  using a DOM parser either.
+  using a DOM parser and XPath either...
+- Polygons in OSM are tricky, in particular [multipolygons](http://wiki.openstreetmap.org/wiki/Relation:multipolygon)
 
 My first prototypes on the full data always were running out of memory; reducing
 the data set via Osmosis did not work, as it led to missing ways. So I needed
@@ -68,7 +74,8 @@ system paths (have a look at the pom.xml, for what you need).
 
 ## Index construction
 
-The index essentially is a large pixmap referencing metadata from OSM.
+The index essentially is a large pixmap referencing metadata from OSM, accompanied
+with a table containing the metadata from the index.
 
 ### Rendering
 
@@ -79,8 +86,8 @@ we needed an API that can render polygons with the even-odd rule and antialiasin
 and the java-gnome Cairo API wouldn't allow us access the resulting bitmaps without
 writing them to disk as PNG.
 
-The JavaFX renderer has a texture limit of 8192x8192 - if we want a higher resolution,
-we need to draw multiple patches, and combine them.
+Since the JavaFX renderer has a texture limit of 8192x8192, we need to render smaller patches
+and combine them to get a high-resolution map.
 
 ### File Format
 
@@ -92,24 +99,53 @@ application memory.
 
 1. 4 bytes: magic header that identifies the file format. Currently,
 this is the code 0x6e06e000, and I will increment the last byte on format changes.
-2. 2 bytes: width of the map
-3. 2 bytes: height of the map
-4. 2 bytes: number of entities (max 0x8000)
-5. height * 2 bytes: length of each row
-6. x bytes for each row, as listed before (row encoding: see below)
-7. nument * 2 bytes: length of metadata entries
-8. x bytes for each metadata
+2. 2 bytes: width of the map in pixel
+3. 2 bytes: height of the map in pixel
+4. 4 bytes: width of the map in degree
+5. 4 bytes: height of the map in degree
+6. 4 bytes: longitude offset of the map in degree (usually +180°)
+7. 4 bytes: latitude offset of the map in degree
+8. 2 bytes: number of entities (max 0x8000)
+9. height * 2 bytes: length of each row
+10. x bytes for each row, as listed before (row encoding: see below)
+11. nument * 2 bytes: length of metadata entries
+12. x bytes for each metadata
 
 Each row is encoded using a run-length encoding. Either 2 or 3 bytes compose a run.
 The highest bit indicates repetitions, the remaining 15 bit indicate the entity ID.
 If the highest bit was set, the pixel is repeated 1+n times, where n is the following
-byte.
+byte; otherwise it is a single pixel (2 bytes only).
 
-Metadata is stored similarly: first a block gives the length of each entry; then the
-serialized entries are given. Entries are UTF-8 encoded, are *not* 0 terminated, and
-may include tab characters to separate columns. The exact column layout is not
+Metadata is stored similarly to the rows: first a block gives the length of each entry;
+then the serialized entries are given. Entries are UTF-8 encoded, are *not* 0 terminated,
+and may include tab characters to separate columns. The exact column layout is not
 specified in this file format.
+
+This format is designed to provide reasonable compression, while still allowing fast
+random access without having to decompress the full data. Only the UTF-8 encoded entities
+may require decoding.
 
 ## Visualization
 
-The index construction will also produce a .png viusalizing the map.
+The index construction will also produce a .png visualizing the map, as shown above.
+
+## Improving the Data
+
+I am aware there are areas where the data is not yet very good. For example in Portugal,
+there is little detailed information. You are welcome to contribute data: just contribute
+administrative boundaries to [OpenStreetMap](http://www.openstreetmap.org/)!
+For example for Portugal, there is a
+[project to add administrative boundaries](http://wiki.openstreetmap.org/wiki/WikiProject_Portugal/Divis%C3%B5es_Administrativas/Lista_de_Divis%C3%B5es_Administrativas),
+exactly what is needed for this index. While I'm writing this, somebody is drawing
+the polygons, which will be included in the next build. Isn't that great?
+
+## Licensing
+
+The index construction code is AGPL-3 licensed (see [LICENSE](LICENSE)).
+I am aware this is a rather restrictive license, but I believe in Copyleft and the GPL.
+
+The data is derived from OpenStreetmap, and thus under the
+[Open Data Commons Open Database License](http://www.openstreetmap.org/copyright)
+and you are required to give credit as "© OpenStreetMap contributors".
+
+The index query code will be licensed more liberally, to make it easy to embed.

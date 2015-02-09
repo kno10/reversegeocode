@@ -11,6 +11,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.gs.collections.api.map.primitive.MutableLongObjectMap;
 import com.gs.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
@@ -38,12 +41,26 @@ import crosby.binary.file.BlockInputStream;
  * @author Erich Schubert
  */
 public class ParseOSM {
+	/** Class logger */
+	private static final Logger LOG = LoggerFactory.getLogger(ParseOSM.class);
+
+	/** Input and output files */
 	File infile, oufile;
 
+	/** Buffer storing all ways */
 	MutableLongObjectMap<long[]> ways = new LongObjectHashMap<long[]>();
 
+	/** Map containing node positions */
 	LongIntHierarchicalMap nodemap = new LongIntHierarchicalMap();
 
+	/**
+	 * Constructor
+	 * 
+	 * @param inname
+	 *            Input file name
+	 * @param outname
+	 *            Output file name
+	 */
 	public ParseOSM(String inname, String outname) {
 		super();
 		this.infile = new File(inname);
@@ -57,7 +74,7 @@ public class ParseOSM {
 			new BlockInputStream(input, new FirstPass()).process();
 			input.close();
 			long end = System.currentTimeMillis();
-			System.err.println("Runtime pass 1: " + (end - start) / 1000 + "s");
+			LOG.info("Runtime pass 1: {} s", (end - start) / 1000);
 		}
 		{
 			long start = System.currentTimeMillis();
@@ -65,7 +82,7 @@ public class ParseOSM {
 			new BlockInputStream(input, new SecondPass()).process();
 			input.close();
 			long end = System.currentTimeMillis();
-			System.err.println("Runtime pass 2: " + (end - start) / 1000 + "s");
+			LOG.info("Runtime pass 2: {} s", (end - start) / 1000);
 		}
 		{
 			long start = System.currentTimeMillis();
@@ -76,7 +93,7 @@ public class ParseOSM {
 			output.flush();
 			output.close();
 			long end = System.currentTimeMillis();
-			System.err.println("Runtime pass 3: " + (end - start) / 1000 + "s");
+			LOG.info("Runtime pass 3: {} s", (end - start) / 1000);
 		}
 	}
 
@@ -90,8 +107,7 @@ public class ParseOSM {
 			}
 			this.ncounter += nodes.getIdCount();
 			if (this.ncounter % 10000000 == 0) {
-				System.err.println(this.ncounter
-						+ " nodes skipped (first pass).");
+				LOG.info("{} nodes skipped (first pass).", this.ncounter);
 			}
 		}
 
@@ -102,8 +118,7 @@ public class ParseOSM {
 			}
 			this.ncounter += nodes.size();
 			if (this.ncounter % 10000000 == 0) {
-				System.err.println(this.ncounter
-						+ " nodes skipped (first pass).");
+				LOG.info("{} nodes skipped (first pass).", this.ncounter);
 			}
 		}
 
@@ -133,7 +148,7 @@ public class ParseOSM {
 				ways.put(w.getId(), nodes);
 				++wcounter;
 				if (wcounter % 1000000 == 0) {
-					System.err.println(wcounter + " ways read.");
+					LOG.info("{} ways read.", wcounter);
 				}
 			}
 		}
@@ -144,7 +159,7 @@ public class ParseOSM {
 				parseRelation(r);
 				++this.rcounter;
 				if (this.rcounter % 1000000 == 0) {
-					System.err.println(rcounter + " relations read.");
+					LOG.info("{} relations read.", rcounter);
 				}
 			}
 		}
@@ -172,8 +187,8 @@ public class ParseOSM {
 				}
 				long[] nodes = ways.get(id);
 				if (nodes == null) {
-					System.err.println("Unknown way seen: " + id
-							+ " in relation: " + r.getId());
+					LOG.info("Unknown way seen: {} in relation: {}", id,
+							r.getId());
 					continue;
 				}
 				// Mark as needed.
@@ -188,14 +203,14 @@ public class ParseOSM {
 
 		@Override
 		public void complete() {
-			System.err.println(ncounter + " nodes, " + wcounter + " ways, "
-					+ rcounter + " relations");
+			LOG.info("{} nodes, {} ways, {} relations", //
+					ncounter, wcounter, rcounter);
 			Runtime rt = Runtime.getRuntime();
 			long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (before GC): " + used);
+			LOG.info("Memory consumption (before GC): {} MB", used);
 			System.gc();
 			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (after GC): " + used);
+			LOG.info("Memory consumption (after GC): {} MB", used);
 			// Remove ways which are not needed, mark nodes that we do need.
 			ncounter = 0;
 			Iterator<long[]> it = ways.iterator();
@@ -214,13 +229,12 @@ public class ParseOSM {
 				}
 			}
 			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (before GC): " + used);
+			LOG.info("Memory consumption (before GC): {} MB", used);
 			System.gc();
 			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (after GC): " + used);
-			System.err.println(ncounter + " nodes, " + wcounter + " ways, "
-					+ rcounter + " relations, nodes to collect: "
-					+ nodemap.computeSize());
+			LOG.info("Memory consumption (after GC): {} MB", used);
+			LOG.info("{} nodes, {} ways, {} relations, nodes to collect: {}",
+					ncounter, wcounter, rcounter, nodemap.computeSize());
 			if (nodemap.computeSize() == 0) {
 				throw new RuntimeException("No nodes to keep.");
 			}
@@ -252,9 +266,8 @@ public class ParseOSM {
 
 		protected void processNode(long id, double lon, double lat) {
 			++ncounter;
-			if (this.ncounter % 10000000 == 0) {
-				System.err.println(this.ncounter
-						+ " nodes processed (second pass).");
+			if (ncounter % 10000000 == 0) {
+				LOG.info("{} nodes processed (second pass).", ncounter);
 			}
 			if (!nodemap.containsKey(id)) {
 				return;
@@ -280,13 +293,13 @@ public class ParseOSM {
 
 		@Override
 		public void complete() {
-			System.err.println(ncounter + " nodes, " + n2counter + " kept.");
+			LOG.info("{} nodes, {} kept.", ncounter, n2counter);
 			Runtime rt = Runtime.getRuntime();
 			long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (before GC): " + used);
+			LOG.info("Memory consumption (before GC): {} MB", used);
 			System.gc();
 			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			System.err.println("Memory consumption (after GC): " + used);
+			LOG.info("Memory consumption (after GC): {} MB", used);
 			if (n2counter == 0) {
 				throw new RuntimeException("No nodes were kept.");
 			}
@@ -342,8 +355,7 @@ public class ParseOSM {
 			}
 			this.ncounter += nodes.getIdCount();
 			if (this.ncounter % 10000000 == 0) {
-				System.err.println(this.ncounter
-						+ " nodes skipped (first pass).");
+				LOG.info("{} nodes skipped (third pass).", ncounter);
 			}
 		}
 
@@ -354,8 +366,7 @@ public class ParseOSM {
 			}
 			this.ncounter += nodes.size();
 			if (this.ncounter % 10000000 == 0) {
-				System.err.println(this.ncounter
-						+ " nodes skipped (first pass).");
+				LOG.info("{} nodes skipped (third pass).", ncounter);
 			}
 		}
 
@@ -378,7 +389,7 @@ public class ParseOSM {
 						int cur = nodemap.getIfAbsent(id, Integer.MIN_VALUE);
 						if (cur == Integer.MIN_VALUE) {
 							++mnode;
-							// System.err.println("Missing node: " + id);
+							// LOG.info("Missing node: {}", id);
 							continue;
 						}
 						if (cur == last) {
@@ -400,7 +411,7 @@ public class ParseOSM {
 				}
 				++wcounter;
 				if (wcounter % 1000000 == 0) {
-					System.err.println(wcounter + " ways read.");
+					LOG.info("{} ways read (third pass).", wcounter);
 				}
 			}
 		}
@@ -411,7 +422,7 @@ public class ParseOSM {
 				parseRelation(r);
 				++this.rcounter;
 				if (this.rcounter % 1000000 == 0) {
-					System.err.println(rcounter + " relations read.");
+					LOG.info("{} relations read (third pass).", rcounter);
 				}
 			}
 		}
@@ -435,8 +446,8 @@ public class ParseOSM {
 					}
 					long[] nodes = ways.get(id);
 					if (nodes == null) {
-						System.err.println("Unknown way seen: " + id
-								+ " in relation: " + r.getId());
+						LOG.info("Unknown way seen: {} in relation: {}",//
+								id, r.getId());
 						continue;
 					}
 					String role = getStringById(r.getRolesSid(i));
@@ -477,7 +488,7 @@ public class ParseOSM {
 				if (cur == Integer.MIN_VALUE) {
 					// buf.append("\tmissing");
 					++mnode;
-					// System.err.println("Missing node: " + nid);
+					// LOG.info("Missing node: {}", nid);
 					continue;
 				}
 				if (cur == last) {
@@ -497,7 +508,7 @@ public class ParseOSM {
 				int cur = nodemap.getIfAbsent(nid, Integer.MIN_VALUE);
 				if (cur == Integer.MIN_VALUE) {
 					++mnode;
-					// System.err.println("Missing node: " + nid);
+					// LOG.info("Missing node: {}", nid);
 					continue;
 				}
 				if (cur == last) {
@@ -527,12 +538,9 @@ public class ParseOSM {
 					}
 				} else {
 					buf.delete(trunk, buf.length());
-					if (metadata.name.contains("Zaragoza")) {
-						System.err.append(buf);
-						System.err.println(": Could not close way starting at "
-								+ first + " ending " + last + " (relation id "
-								+ rid + ").");
-					}
+					LOG.info(
+							"Could not close way starting {} - {} in relation {}",
+							first, last, rid);
 				}
 			}
 		}
@@ -573,9 +581,9 @@ public class ParseOSM {
 
 		@Override
 		public void complete() {
-			System.err.println(ncounter + " nodes, " + wcounter + " ways, "
-					+ rcounter + " relations");
-			System.err.println("Missing nodes: " + mnode);
+			LOG.info("{} nodes, {} ways, {} relations", //
+					ncounter, wcounter, rcounter);
+			LOG.info("Missing nodes: {}", mnode);
 		}
 
 		public class Metadata {
