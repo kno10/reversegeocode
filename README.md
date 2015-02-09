@@ -154,17 +154,6 @@ For example there is a project underway to
 exactly what is needed for this index. While I'm writing this, somebody is drawing
 the polygons, which will be included in the next build. Isn't that great?
 
-## TODO
-
-1. As is, metadata is not aggregated over the hierarchy yet. So the index may know that a location
-is somewhere in New York City, but it doesn't know that NYC is in the state New York, or that this
-is also part of the United State of America. This sounds like an easy job at first, but once you realize
-that the way administrative regions are organized varies around the world, it's not that easy anymore...
-2. OpenStreetMap data is a bit tricky, and the code extracting the metadata could use more finetuning,
-as well as more consistent use of tags on OSM itself.
-
-Contributions are welcome!
-
 ## Licensing
 
 The index ''construction'' code is AGPL-3 licensed (see [LICENSE](LICENSE)).
