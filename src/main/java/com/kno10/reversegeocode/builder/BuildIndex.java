@@ -326,7 +326,7 @@ public class BuildIndex extends Application {
 		LOG.info("Number of used entities: {}", c);
 		byte[] buffer = new byte[viewport.width * 8]; // Output buffer.
 
-		if (c > 0x8000) {
+		if (c > 0xFFFF) {
 			// In this case, you'll need to extend the file format below.
 			throw new RuntimeException(
 					"Current file version only allows 0x8000 entities.");
@@ -353,7 +353,7 @@ public class BuildIndex extends Application {
 			// Encode the rows
 			byte[][] rows = new byte[viewport.height][];
 			for (int y = 0; y < viewport.height; y++) {
-				int len = encodeLine(winner[y], map, buffer);
+				int len = encodeLine16(winner[y], map, buffer);
 				rows[y] = Arrays.copyOf(buffer, len);
 			}
 			// Write the row header table
@@ -405,25 +405,20 @@ public class BuildIndex extends Application {
 	 * @return Length
 	 */
 	// TODO: develop even more compact RLEs for this use case.
-	private int encodeLine(int[] winner, int[] map, byte[] buffer) {
+	private int encodeLine16(int[] winner, int[] map, byte[] buffer) {
 		int len = 0;
 		// Perform a simple run-length encoding.
 		for (int x = 0; x < winner.length; ++x) {
 			final int cur = winner[x];
 			int run = 0; // Run length - 1
-			for (; run < 256 && x + 1 < winner.length && winner[x + 1] == cur; ++x) {
+			for (; run < 255 && x + 1 < winner.length && winner[x + 1] == cur; ++x) {
 				++run;
 			}
 			int val = map[cur];
-			assert (val <= 0x7FFF);
-			if (run > 0) {
-				buffer[len++] = (byte) (((val >>> 8) & 0xFF) | 0x80);
-				buffer[len++] = (byte) (val & 0xFF);
-				buffer[len++] = (byte) (run - 1);
-			} else { // Note: high bit must not be set!
-				buffer[len++] = (byte) ((val >>> 8) & 0xFF);
-				buffer[len++] = (byte) (val & 0xFF);
-			}
+			assert (val <= 0xFFFF);
+			buffer[len++] = (byte) (((val >>> 8) & 0xFF) | 0x80);
+			buffer[len++] = (byte) (val & 0xFF);
+			buffer[len++] = (byte) run;
 		}
 		return len;
 	}

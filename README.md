@@ -1,7 +1,7 @@
-# Simple (but fast) reverse Geocoding with OpenStreetMap data
+# Incredibly Fast Reverse Geocoding with OpenStreetMap Data
 
-The goal of this project is to build a primitive but fast reverse geocoding
-(coordinates to location lookup) system.
+The goal of this project is to build a primitive but incredibly fast
+reverse geocoding (coordinates to location lookup) system.
 
 The basic principle is simple:
 - extract polygons of each administrative region on OpenStreetMap (OSM)
@@ -127,10 +127,8 @@ this is the code 0x6e06e000, and I will increment the last byte on format change
 11. nument * 2 bytes: length of metadata entries
 12. x bytes for each metadata
 
-Each row is encoded using a run-length encoding. Either 2 or 3 bytes compose a run.
-The highest bit indicates repetitions, the remaining 15 bit indicate the entity ID.
-If the highest bit was set, the pixel is repeated 1+n times, where n is the following
-byte; otherwise it is a single pixel (2 bytes only).
+Each row is encoded using a run-length encoding. The first two bytes contain the entity
+id, followed by a byte storing the repetition counter (but -1, since there cannot be 0 repetitions).
 
 Metadata is stored similarly to the rows: first a block gives the length of each entry;
 then the serialized entries are given. Entries are UTF-8 encoded, are *not* 0 terminated,

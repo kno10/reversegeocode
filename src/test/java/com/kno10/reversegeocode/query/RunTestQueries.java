@@ -24,6 +24,18 @@ public class RunTestQueries {
 				System.out.format(Locale.ROOT, "%8.4f %8.4f %s\n", f[0], f[1],
 						rgc.lookup(f[0], f[1]));
 			}
+			for (int i = 0; i < 20; i++) {
+				float f1 = (float) (Math.random() * 360. - 180);
+				float f2 = (float) (Math.random() * 120. - 60);
+				String l = rgc.lookup(f1, f2);
+				if ("Earth".equals(l)) {
+					--i;
+					continue;
+				}
+				System.out.format(Locale.ROOT, "%8.4f %8.4f %s\n", f1, f2, l);
+			}
+			System.out.format(Locale.ROOT, "Number of entities: %d\n",
+					rgc.numentries);
 			rgc.close();
 		} catch (IOException e) {
 			e.printStackTrace();

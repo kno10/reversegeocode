@@ -167,7 +167,7 @@ public class ParseOSM {
 				ways.put(w.getId(), nodes);
 				++wcounter;
 				if (wcounter % 1000000 == 0) {
-					LOG.info("{} ways read.", wcounter);
+					LOG.info("{} ways read (first pass).", wcounter);
 				}
 			}
 		}
@@ -178,7 +178,7 @@ public class ParseOSM {
 				parseRelation(r);
 				++this.rcounter;
 				if (this.rcounter % 1000000 == 0) {
-					LOG.info("{} relations read.", rcounter);
+					LOG.info("{} relations read (first pass).", rcounter);
 				}
 			}
 		}
@@ -469,10 +469,7 @@ public class ParseOSM {
 								id, r.getId());
 						continue;
 					}
-					String role = getStringById(r.getRolesSid(i));
-					if (!"outer".equals(role) && !"inner".equals(role)) {
-						continue; // Unknown role
-					}
+					// NOTE: ignoring the "role" for now, used inconsistently
 					// Note: last value is used for flags.
 					if (nodes[0] == nodes[nodes.length - 2]) {
 						int t2 = buf.length();
@@ -557,7 +554,7 @@ public class ParseOSM {
 					}
 				} else {
 					buf.delete(trunk, buf.length());
-					LOG.info(
+					LOG.debug(
 							"Could not close way starting {} - {} in relation {}",
 							first, last, rid);
 				}
@@ -606,17 +603,16 @@ public class ParseOSM {
 		}
 
 		public class Metadata {
-			String levl = null, name = null, inam = null, enam = null,
-					wiki = null, wikd = null, boun = null, coun = null,
-					plac = null;
+			String levl = null, name = null, inam = null, wiki = null,
+					wikd = null, boun = null, coun = null, plac = null;
 
 			public void reset() {
 				levl = null;
 				name = null;
-				boun = null;
 				inam = null;
 				wiki = null;
 				wikd = null;
+				boun = null;
 				coun = null;
 				plac = null;
 			}
@@ -652,12 +648,11 @@ public class ParseOSM {
 				case "place_name":
 					name = val;
 					break;
-				case "int_name":
-					inam = val;
-					break;
 				case "name:en":
 				case "place_name:en":
-					enam = val;
+					inam = val;
+					break;
+				case "int_name":
 					inam = (inam == null) ? val : inam;
 					break;
 				// Country
@@ -704,7 +699,6 @@ public class ParseOSM {
 			public void append(StringBuilder buf) {
 				buf.append(name);
 				buf.append('\t').append(inam == null ? name : inam);
-				buf.append('\t').append(enam == null ? name : enam);
 				buf.append('\t').append(coun == null ? "" : coun);
 				buf.append('\t').append(plac == null ? "" : plac);
 				buf.append('\t').append(wiki == null ? "" : wiki);

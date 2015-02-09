@@ -132,7 +132,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	 * @return Decoded string
 	 */
 	public String lookup(float lon, float lat) {
-		return lookup(lookupUncached(lon, lat));
+		return lookupEntry(lookupUncached(lon, lat));
 	}
 
 	/**
@@ -161,18 +161,10 @@ public class ReverseGeocoder implements AutoCloseable {
 		buffer.position(HEADER_SIZE + height * 2 + sum);
 		for (int i = 0; i <= x;) {
 			int c = buffer.getShort() & 0xFFFF;
-			if (x == i) {
-				return (c & 0x7FFF);
-			}
-			boolean rle = (c & 0x8000) == 0x8000;
-			if (rle) {
-				int l = (buffer.get() & 0xFF) + 2;
-				i += l;
-				if (x < i) {
-					return (c & 0x7FFF);
-				}
-			} else {
-				++i;
+			int l = (buffer.get() & 0xFF) + 1;
+			i += l;
+			if (x < i) {
+				return c;
 			}
 		}
 		return 0;
@@ -185,7 +177,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	 *            Index to lookup
 	 * @return String
 	 */
-	public String lookup(int idx) {
+	public String lookupEntry(int idx) {
 		if (idx < 0 || idx >= numentries) {
 			return null;
 		}
