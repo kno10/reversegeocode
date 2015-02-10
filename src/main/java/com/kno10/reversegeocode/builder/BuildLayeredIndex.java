@@ -127,10 +127,10 @@ public class BuildLayeredIndex extends Application {
 		}
 
 		// Viewport on map
-		double resolution = 0.05;
-		this.viewport = new Viewport(360., 140., 180., 60., resolution);
+		double resolution = 0.01;
+		this.viewport = new Viewport(360., 180., 180., 90., resolution);
 
-		double pixel_minsize = 4; // Minimum number of pixels (BB)
+		double pixel_minsize = 2; // Minimum number of pixels (BB)
 		this.minsize = pixel_minsize * resolution;
 	}
 
@@ -158,7 +158,8 @@ public class BuildLayeredIndex extends Application {
 					LOG.warn("Line was not matched: {}", line);
 					continue;
 				}
-				meta = line.substring(0, lm.start() - 1);
+				// We keep metadata 0-terminated as seperator!
+				meta = line.substring(0, lm.end()) + '\0';
 				int level = Integer.parseInt(lm.group(1));
 				assert (!lm.find());
 				m.reset(line);
@@ -227,7 +228,7 @@ public class BuildLayeredIndex extends Application {
 		WritableImage writableImage = null; // Buffer
 
 		MutableIntObjectMap<String> meta = new IntObjectHashMap<>();
-		meta.put(0, "Earth");
+		meta.put(0, ""); // Note: deliberately not \0 terminated.
 		int entnum = 1;
 
 		int[][] winners = new int[viewport.height][viewport.width];
@@ -293,6 +294,7 @@ public class BuildLayeredIndex extends Application {
 								entnum, alphas);
 					}
 				}
+				// Note: we construct meta 0-terminated!
 				meta.put(entnum, e.key);
 				++entnum;
 			}
@@ -384,7 +386,8 @@ public class BuildLayeredIndex extends Application {
 				}
 			}
 			if (best > 0) {
-				meta.put(i, meta.get(i) + '\t' + meta.get(best));
+				meta.put(i, meta.get(i) /* 0 terminated! *///
+						+ meta.get(best) /* 0 terminated */);
 			}
 		});
 		for (int y = 0; y < viewport.height; y++) {

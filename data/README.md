@@ -31,3 +31,42 @@ It often does not even provide county level information.
 This data file has the resolution reduced to 0.05 degree, with 1 pixel minimum size.
 It provides an even coarser view on the data, containing 35013 entities.
 It often does not even provide county level information.
+
+![Visualization](osm-20150126-0.05-visualization.png)
+
+## Columns
+
+All these data files are built from the same source, and the columns included are
+
+1. Name as used on OSM (usually a localized name)
+2. International or English name (often a transcribed name)
+3. A 2-letter country code, if available (often not available on detailed levels)
+4. A place type, if available (e.g. city, county, ...)
+5. A link to Wikipedia, preferrably to the localized version
+6. [WikiData](http://www.wikidata.org/) entry id, if annotated
+7. Administrative level as [used by OSM](http://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative),
+but usage may vary across countries.
+
+### Examples
+
+The following are some example results from the 0.01 resolution file.
+Each row is one entity reported, and ` | ` indicates a tab separator.
+
+In Manhattan:
+
+    New York City | New York City         | US | city  | en:New York City |        | 5
+    New York      | New York              | US |       | en:New York      | Q1384  | 4
+    United States of America|United States of America|US||en:United States| Q30    | 2
+
+At the center of Munich:
+
+    München       | Munich                |    | city  | de:München       | Q1726  | 6
+    Oberbayern    | Upper Bavaria         |    |       | de:Oberbayern    | Q10562 | 5
+    Bayern        | Free State of Bavaria | DE | state | de:Bayern        | Q980   | 4
+    Deutschland   | Germany               | DE |       | de:Deutschland   | Q183   | 2
+
+In the Mediterranean Sea close to Spain:
+
+    España        | Spain                 | ES |       | es:España        | Q29   | 2
+
+Yes, there may be errors in the data. They should be fixed in [OpenStreetMap](http://www.openstreetmap.org/)

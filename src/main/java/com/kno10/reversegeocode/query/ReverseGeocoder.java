@@ -34,6 +34,7 @@ package com.kno10.reversegeocode.query;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.CharBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.charset.CharacterCodingException;
@@ -53,6 +54,9 @@ public class ReverseGeocoder implements AutoCloseable {
 
 	/** Decoder */
 	static final CharsetDecoder DECODER = Charset.forName("UTF-8").newDecoder();
+
+	/** Empty array - no match */
+	private static final String[] EMPTY = new String[0];
 
 	/** File name */
 	File filename;
@@ -76,7 +80,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	int metaoffset;
 
 	/** String cache, so we only have to decode UTF-8 once. */
-	String[] cache;
+	String[][] cache;
 
 	/**
 	 * Constructor.
@@ -119,7 +123,7 @@ public class ReverseGeocoder implements AutoCloseable {
 		assert (buffer.position() == HEADER_SIZE + height * 2);
 		metaoffset = buffer.position() + sum;
 
-		cache = new String[numentries];
+		cache = new String[numentries][];
 	}
 
 	/**
@@ -131,7 +135,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	 *            Latitude
 	 * @return Decoded string
 	 */
-	public String lookup(float lon, float lat) {
+	public String[] lookup(float lon, float lat) {
 		return lookupEntry(lookupUncached(lon, lat));
 	}
 
@@ -177,7 +181,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	 *            Index to lookup
 	 * @return String
 	 */
-	public String lookupEntry(int idx) {
+	public String[] lookupEntry(int idx) {
 		if (idx < 0 || idx >= numentries) {
 			return null;
 		}
@@ -194,7 +198,7 @@ public class ReverseGeocoder implements AutoCloseable {
 	 *            Index entry
 	 * @return Decoded data.
 	 */
-	public String lookupEntryUncached(int idx) {
+	public String[] lookupEntryUncached(int idx) {
 		// Find the row position
 		buffer.limit(buffer.capacity());
 		buffer.position(metaoffset);
@@ -203,13 +207,30 @@ public class ReverseGeocoder implements AutoCloseable {
 			sum += buffer.getShort() & 0xFFFF;
 		}
 		int l = buffer.getShort() & 0xFFFF;
+		if (l == 0) {
+			return EMPTY;
+		}
 		// Compute offsets for UTF-8 encoded string.
 		int p = metaoffset + numentries * 2 + sum;
+		// Count the number of 0-delimited entries
 		buffer.position(p);
 		buffer.limit(p + l);
-		// Decode
 		try {
-			return DECODER.decode(buffer).toString();
+			CharBuffer decoded = DECODER.decode(buffer);
+			int nummeta = 0, end = decoded.length();
+			for (int i = 0; i < end; i++) {
+				if (decoded.get(i) == '\0') {
+					++nummeta;
+				}
+			}
+			String[] ret = new String[nummeta];
+			for (int i = 0, j = 0, k = 0; i < end; i++) {
+				if (decoded.get(i) == '\0') {
+					ret[k++] = decoded.subSequence(j, i).toString();
+					j = i + 1;
+				}
+			}
+			return ret;
 		} catch (CharacterCodingException e) {
 			throw new RuntimeException("Invalid encoding in index.", e);
 		}

@@ -21,18 +21,26 @@ public class RunTestQueries {
 		try {
 			ReverseGeocoder rgc = new ReverseGeocoder(args[0]);
 			for (float[] f : data) {
-				System.out.format(Locale.ROOT, "%8.4f %8.4f %s\n", f[0], f[1],
-						rgc.lookup(f[0], f[1]));
+				String[] l = rgc.lookup(f[0], f[1]);
+				System.out.format(Locale.ROOT, "%8.4f %8.4f", f[0], f[1]);
+				for (String s : l) {
+					System.out.append("||").append(s);
+				}
+				System.out.append('\n');
 			}
 			for (int i = 0; i < 20; i++) {
 				float f1 = (float) (Math.random() * 360. - 180);
 				float f2 = (float) (Math.random() * 120. - 60);
-				String l = rgc.lookup(f1, f2);
-				if ("Earth".equals(l)) {
+				String[] l = rgc.lookup(f1, f2);
+				if (l.length == 0) {
 					--i;
 					continue;
 				}
-				System.out.format(Locale.ROOT, "%8.4f %8.4f %s\n", f1, f2, l);
+				System.out.format(Locale.ROOT, "%8.4f %8.4f", f1, f2);
+				for (String s : l) {
+					System.out.append("||").append(s);
+				}
+				System.out.append('\n');
 			}
 			System.out.format(Locale.ROOT, "Number of entities: %d\n",
 					rgc.numentries);
