@@ -34,6 +34,15 @@ It often does not even provide county level information.
 
 ![Visualization](osm-20150126-0.05-visualization.png)
 
+In this image, you can also see that the data includes coastal areas as claimed
+by the countries. A coordinate off the coast of Peru will thus still yield the
+result Peru.
+
+## [osm-20150126-0.01-fine.bin](osm-20150126-0.01-fine.bin)
+
+Same as 0.01, but with the minimum size reduced to 1.5 pixels bounding box,
+and 59840 entities included.
+
 ## Columns
 
 All these data files are built from the same source, and the columns included are
