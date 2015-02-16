@@ -34,6 +34,7 @@ package com.kno10.reversegeocode.query;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel.MapMode;
@@ -50,7 +51,7 @@ import java.nio.charset.CharsetDecoder;
  */
 public class ReverseGeocoder implements AutoCloseable {
 	/** Number of header bytes total. */
-	private static final int HEADER_SIZE = 26;
+	private static final int HEADER_SIZE = 32;
 
 	/** Decoder */
 	static final CharsetDecoder DECODER = Charset.forName("UTF-8").newDecoder();
@@ -76,9 +77,6 @@ public class ReverseGeocoder implements AutoCloseable {
 	/** Number of entries in the map. */
 	int numentries;
 
-	/** Position of map and metadata in the file. */
-	int metaoffset;
-
 	/** String cache, so we only have to decode UTF-8 once. */
 	String[][] cache;
 
@@ -103,25 +101,18 @@ public class ReverseGeocoder implements AutoCloseable {
 		file = new RandomAccessFile(filename, "r");
 		buffer = file.getChannel().map(MapMode.READ_ONLY, 0, file.length());
 		int magic = buffer.getInt();
-		if (magic != 0x6e06e000) {
+		if (magic != 0x6e06e001) {
 			throw new IOException(
 					"Index file does not have the correct type or version.");
 		}
-		width = buffer.getShort() & 0xFFFF;
-		height = buffer.getShort() & 0xFFFF;
+		width = buffer.getInt();
+		height = buffer.getInt();
 		xscale = width / buffer.getFloat();
 		yscale = height / buffer.getFloat();
 		xshift = buffer.getFloat();
 		yshift = buffer.getFloat();
-		numentries = buffer.getShort() & 0xFFFF;
+		numentries = buffer.getInt();
 		assert (buffer.position() == HEADER_SIZE);
-		// Read the row indexes, to compute the position of the metadata
-		int sum = 0;
-		for (int i = 0; i < height; i++) {
-			sum += buffer.getShort() & 0xFFFF; // Length of the encoded row
-		}
-		assert (buffer.position() == HEADER_SIZE + height * 2);
-		metaoffset = buffer.position() + sum;
 
 		cache = new String[numentries][];
 	}
@@ -156,22 +147,42 @@ public class ReverseGeocoder implements AutoCloseable {
 		}
 		// Find the row position
 		buffer.limit(buffer.capacity());
-		buffer.position(HEADER_SIZE);
-		int sum = 0;
-		for (int i = 0; i < y; i++) {
-			sum += buffer.getShort() & 0xFFFF;
-		}
+		buffer.position(HEADER_SIZE + (y << 2));
+		int rowpos = buffer.getInt();
 		// Seek to row
-		buffer.position(HEADER_SIZE + height * 2 + sum);
+		buffer.position(rowpos);
 		for (int i = 0; i <= x;) {
-			int c = buffer.getShort() & 0xFFFF;
-			int l = (buffer.get() & 0xFF) + 1;
-			i += l;
+			int c = readUnsignedVarint(buffer);
+			i += readUnsignedVarint(buffer) + 1;
 			if (x < i) {
 				return c;
 			}
 		}
 		return 0;
+	}
+
+	/**
+	 * Read an unsigned integer.
+	 * 
+	 * @param buffer
+	 *            Buffer to read from
+	 * @return Integer value
+	 */
+	private static int readUnsignedVarint(ByteBuffer buffer) {
+		int val = 0;
+		int bits = 0;
+		while (true) {
+			final int data = buffer.get();
+			val |= (data & 0x7F) << bits;
+			if ((data & 0x80) == 0) {
+				return val;
+			}
+			bits += 7;
+			if (bits > 35) {
+				throw new RuntimeException(
+						"Variable length quantity is too long for expected integer.");
+			}
+		}
 	}
 
 	/**
@@ -201,22 +212,16 @@ public class ReverseGeocoder implements AutoCloseable {
 	public String[] lookupEntryUncached(int idx) {
 		// Find the row position
 		buffer.limit(buffer.capacity());
-		buffer.position(metaoffset);
-		int sum = 0;
-		for (int i = 0; i < idx; i++) {
-			sum += buffer.getShort() & 0xFFFF;
-		}
-		int l = buffer.getShort() & 0xFFFF;
-		if (l == 0) {
+		buffer.position(HEADER_SIZE + ((height + idx) << 2));
+		int start = buffer.getInt(), endp = buffer.getInt();
+		if (start == endp) {
 			return EMPTY;
 		}
-		// Compute offsets for UTF-8 encoded string.
-		int p = metaoffset + numentries * 2 + sum;
-		// Count the number of 0-delimited entries
-		buffer.position(p);
-		buffer.limit(p + l);
 		try {
+			// Decode charset:
+			buffer.position(start).limit(endp);
 			CharBuffer decoded = DECODER.decode(buffer);
+			// Count the number of 0-delimited entries
 			int nummeta = 0, end = decoded.length();
 			for (int i = 0; i < end; i++) {
 				if (decoded.get(i) == '\0') {

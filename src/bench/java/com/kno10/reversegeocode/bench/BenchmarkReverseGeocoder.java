@@ -29,12 +29,16 @@ import com.kno10.reversegeocode.query.ReverseGeocoder;
 @Fork(1)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
+// @BenchmarkMode(Mode.AverageTime)
+// @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class BenchmarkReverseGeocoder {
+	static final String FILENAME = "osm-20150126-0.01.bin";
+
 	ReverseGeocoder rgc;
 
 	@Setup(Level.Trial)
 	public void setup() throws IOException {
-		rgc = new ReverseGeocoder("data/osm-20150126-0.01.bin");
+		rgc = new ReverseGeocoder(FILENAME);
 	}
 
 	@TearDown
@@ -49,30 +53,30 @@ public class BenchmarkReverseGeocoder {
 	 */
 	@Benchmark
 	public int randomNumberGeneration() {
-		float f1 = (float) (Math.random() * 360. - 180);
-		float f2 = (float) (Math.random() * 120. - 60);
+		float f1 = (float) (Math.random() * 360. - 180.);
+		float f2 = (float) (Math.random() * 120. - 60.);
 		return (int) (f1 + f2);
 	}
 
 	@Benchmark
 	public int lookup() {
-		float f1 = (float) (Math.random() * 360. - 180);
-		float f2 = (float) (Math.random() * 120. - 60);
+		float f1 = (float) (Math.random() * 360. - 180.);
+		float f2 = (float) (Math.random() * 120. - 60.);
 		return rgc.lookup(f1, f2).length;
 	}
 
 	@Benchmark
 	public int lookupUncached() {
-		float f1 = (float) (Math.random() * 360. - 180);
-		float f2 = (float) (Math.random() * 120. - 60);
+		float f1 = (float) (Math.random() * 360. - 180.);
+		float f2 = (float) (Math.random() * 120. - 60.);
 		return rgc.lookupEntryUncached(rgc.lookupUncached(f1, f2)).length;
 	}
 
 	@Benchmark
 	public int openQueryClose() throws IOException {
-		ReverseGeocoder lrgc = new ReverseGeocoder("data/osm-20150126-0.01.bin");
-		float f1 = (float) (Math.random() * 360. - 180);
-		float f2 = (float) (Math.random() * 120. - 60);
+		ReverseGeocoder lrgc = new ReverseGeocoder(FILENAME);
+		float f1 = (float) (Math.random() * 360. - 180.);
+		float f2 = (float) (Math.random() * 120. - 60.);
 		int ret = lrgc.lookup(f1, f2).length;
 		lrgc.close();
 		return ret;

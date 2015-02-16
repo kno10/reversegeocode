@@ -16,32 +16,35 @@ The following data files are currently provided:
 This data file has a resolution of 0.01 degree, and includes rather small
 polygons (minimum bounding box size 4 pixels). This can sometimes be too
 detailed for your usage. But on the other hand, it will recognize major
-cities by name. It includes 38875 entities.
+cities by name. It includes 39645 entities.
 
 ## [osm-20150126-0.02.bin](osm-20150126-0.02.bin)
 
 This data file has the resolution reduced to 0.02 degree, with the same
 bounding box threshold (4 pixels, but 4 times as large as in
 the other file due to the decreased resolution).
-Thus it provides a much coarser view on the data, containing 28699 entities.
+Thus it provides a much coarser view on the data, containing 29008 entities.
 It often does not even provide county level information.
 
 ## [osm-20150126-0.05.bin](osm-20150126-0.05.bin)
 
-This data file has the resolution reduced to 0.05 degree, with 1 pixel minimum size.
-It provides an even coarser view on the data, containing 35013 entities.
+This data file has the resolution reduced to 0.05 degree, with 4 pixel minimum size.
+It provides an even coarser view on the data, containing 18282 entities.
 It often does not even provide county level information.
 
 ![Visualization](osm-20150126-0.05-visualization.png)
 
+## [osm-20150126-0.10.bin](osm-20150126-0.10.bin)
+
+This data file has the resolution reduced to 0.10 degree, with 4 pixel minimum size.
+It provides an even coarser view on the data, containing 11214 entities.
+It often does not even provide county level information.
+
+![Visualization](osm-20150126-0.10-visualization.png)
+
 In this image, you can also see that the data includes coastal areas as claimed
 by the countries. A coordinate off the coast of Peru will thus still yield the
 result Peru.
-
-## [osm-20150126-0.01-fine.bin](osm-20150126-0.01-fine.bin)
-
-Same as 0.01, but with the minimum size reduced to 1.5 pixels bounding box,
-and 59840 entities included.
 
 ## Columns
 
