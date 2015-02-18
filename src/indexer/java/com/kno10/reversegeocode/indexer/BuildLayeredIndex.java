@@ -244,7 +244,7 @@ public class BuildLayeredIndex extends Application {
 	 *            Empty JavaFX stage used for rendering
 	 */
 	public void render(Stage stage) {
-		final int blocksize = 512;
+		final int blocksize = 1024;
 		Group rootGroup = new Group();
 		Scene scene = new Scene(rootGroup, blocksize, blocksize, Color.BLACK);
 		WritableImage writableImage = null; // Buffer
@@ -255,7 +255,6 @@ public class BuildLayeredIndex extends Application {
 
 		int[][] winners = new int[viewport.height][viewport.width];
 		int[][] winner = new int[viewport.height][viewport.width];
-		byte[][] alphas = new byte[viewport.height][viewport.width];
 		long start = System.currentTimeMillis();
 		for (int lev = minLevel; lev <= maxLevel; lev++) {
 			if (entities.get(lev) == null) {
@@ -263,7 +262,6 @@ public class BuildLayeredIndex extends Application {
 			}
 			LOG.info("Rendering level {}", lev);
 			for (int y = 0; y < viewport.height; y++) {
-				Arrays.fill(alphas[y], (byte) 0);
 				Arrays.fill(winner[y], 0);
 			}
 
@@ -312,8 +310,8 @@ public class BuildLayeredIndex extends Application {
 						writableImage = scene.snapshot(writableImage);
 						rootGroup.getChildren().remove(path);
 
-						transferPixels(writableImage, x1, x2, y1, y2, winner,
-								entnum, alphas);
+						transferPixels(writableImage, x1, x2, y1, y2, //
+								winner, entnum);
 					}
 				}
 				// Note: we construct meta 0-terminated!
@@ -348,11 +346,9 @@ public class BuildLayeredIndex extends Application {
 	 *            Output array
 	 * @param c
 	 *            Entity number
-	 * @param alphas
-	 *            Alpha buffer
 	 */
 	public void transferPixels(WritableImage img, int x1, int x2, int y1,
-			int y2, int[][] winner, int c, byte[][] alphas) {
+			int y2, int[][] winner, int c) {
 		PixelReader reader = img.getPixelReader();
 		for (int y = y1, py = 0; y < y2; y++, py++) {
 			for (int x = x1, px = 0; x < x2; x++, px++) {
@@ -364,9 +360,9 @@ public class BuildLayeredIndex extends Application {
 				}
 				// Clip value range to positive bytes,
 				alpha = alpha > 0x7F ? 0x7F : alpha;
-				if (alpha == 0x7F || (alpha > 0 && alpha >= alphas[y][x])) {
-					alphas[y][x] = (byte) alpha;
-					winner[y][x] = c;
+				byte oldalpha = (byte) (winner[y][x] >>> 24);
+				if (alpha == 0x7F || (alpha > 0 && alpha >= oldalpha)) {
+					winner[y][x] = (alpha << 24) | c;
 				}
 			}
 		}
@@ -389,11 +385,10 @@ public class BuildLayeredIndex extends Application {
 		MutableIntObjectMap<MutableIntBag> parents = new IntObjectHashMap<>();
 		for (int y = 0; y < viewport.height; y++) {
 			for (int x = 0; x < viewport.width; x++) {
-				int id = winner[y][x];
+				int id = winner[y][x] & 0xFFFFFF; // top byte is alpha!
 				if (id > 0) {
-					parents.getIfAbsentPut(id, () -> {
-						return new IntHashBag();
-					}).add(winners[y][x]);
+					parents.getIfAbsentPut(id, IntHashBag::new)//
+							.add(winners[y][x]);
 				}
 			}
 		}
@@ -414,7 +409,7 @@ public class BuildLayeredIndex extends Application {
 		});
 		for (int y = 0; y < viewport.height; y++) {
 			for (int x = 0; x < viewport.width; x++) {
-				int id = winner[y][x];
+				int id = winner[y][x] & 0xFFFFFF; // top byte is alpha!
 				if (id > 0) {
 					winners[y][x] = id;
 				}
@@ -447,12 +442,6 @@ public class BuildLayeredIndex extends Application {
 		LOG.info("Number of used entities: {}", c);
 		byte[] buffer = new byte[viewport.width * 8]; // Output buffer.
 
-		if (c > 0xFFFF) {
-			// In this case, you'll need to extend the file format below.
-			throw new RuntimeException(
-					"Current file version only allows 0xFFFF entities.");
-		}
-
 		try (DataOutputStream os = new DataOutputStream(//
 				new FileOutputStream(oufile))) {
 			// First prepare all the data, so that we can put
@@ -471,7 +460,6 @@ public class BuildLayeredIndex extends Application {
 					continue;
 				}
 				byte[] bytes = meta.get(i).getBytes("UTF-8");
-				assert (bytes.length <= 0xFFFF);
 				metadata[c2++] = bytes;
 			}
 			assert (c2 == c);
