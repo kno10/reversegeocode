@@ -19,24 +19,20 @@ package com.kno10.reversegeocode.converter;
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import java.util.Iterator;
-
-import com.gs.collections.api.map.primitive.MutableIntObjectMap;
-import com.gs.collections.api.map.primitive.MutableShortLongMap;
-import com.gs.collections.impl.map.mutable.primitive.IntObjectHashMap;
-import com.gs.collections.impl.map.mutable.primitive.ShortLongHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.shorts.Short2LongOpenHashMap;
 
 /**
  * Hierarchical hash map, long to long.
- * 
+ *
  * This hash-map conserves memory by using Goldman-Sachs collections internally
  * and by using a prefix compression.
- * 
+ *
  * Note: this implementation only allows 48 bit keys. Furthermore, this approach
  * is mostly beneficial when there are a lot of keys that have the same prefix,
  * e.g. because the ids are given out sequentially. If your keys are randomly
  * chosen, this data structure will be much less efficient!
- * 
+ *
  * @author Erich Schubert
  */
 class LongLongHierarchicalMap {
@@ -46,7 +42,7 @@ class LongLongHierarchicalMap {
 	public static final int DEFAULT_SHIFT = 16;
 
 	// Chunked maps.
-	MutableIntObjectMap<MutableShortLongMap> topmap = new IntObjectHashMap<MutableShortLongMap>();
+	Int2ObjectOpenHashMap<Short2LongOpenHashMap> topmap = new Int2ObjectOpenHashMap<Short2LongOpenHashMap>();
 
 	// Size and bitmask for subset
 	final int shift, mask;
@@ -62,7 +58,7 @@ class LongLongHierarchicalMap {
 
 	/**
 	 * Full constructor.
-	 * 
+	 *
 	 * @param shift
 	 *            Number of bits to use for the inner hashmap.
 	 */
@@ -75,7 +71,7 @@ class LongLongHierarchicalMap {
 
 	/**
 	 * Test if a key is present in the hashmap.
-	 * 
+	 *
 	 * @param id
 	 *            Key to test
 	 * @return {@code true} when contained.
@@ -86,13 +82,13 @@ class LongLongHierarchicalMap {
 			throw new RuntimeException(
 					"Too large node ids for this memory layout, increase SHIFT.");
 		}
-		MutableShortLongMap chunk = topmap.get(prefix);
+		Short2LongOpenHashMap chunk = topmap.get(prefix);
 		return (chunk != null) && chunk.containsKey((short) (id & mask));
 	}
 
 	/**
 	 * Get the value of a key
-	 * 
+	 *
 	 * @param id
 	 *            key to retrieve
 	 * @param notfound
@@ -105,16 +101,16 @@ class LongLongHierarchicalMap {
 			throw new RuntimeException(
 					"Too large node ids for this memory layout.");
 		}
-		MutableShortLongMap chunk = topmap.get(prefix);
+		Short2LongOpenHashMap chunk = topmap.get(prefix);
 		if (chunk == null) {
 			return notfound;
 		}
-		return chunk.getIfAbsent((short) (id & mask), notfound);
+		return chunk.getOrDefault((short) (id & mask), notfound);
 	}
 
 	/**
 	 * Store a value in the map.
-	 * 
+	 *
 	 * @param id
 	 *            Key
 	 * @param val
@@ -122,9 +118,9 @@ class LongLongHierarchicalMap {
 	 */
 	public void put(long id, long val) {
 		int prefix = (int) (id >>> shift);
-		MutableShortLongMap chunk = topmap.get(prefix);
+		Short2LongOpenHashMap chunk = topmap.get(prefix);
 		if (chunk == null) {
-			chunk = new ShortLongHashMap();
+			chunk = new Short2LongOpenHashMap();
 			topmap.put(prefix, chunk);
 		}
 		chunk.put((short) (id & mask), val);
@@ -132,17 +128,17 @@ class LongLongHierarchicalMap {
 
 	/**
 	 * Compute the size of the map.
-	 * 
+	 *
 	 * This is more expensive than your usual {@link size()} call, therefore we
 	 * chose a different name. It would be trivial to add a counter to provide
 	 * O(1) size.
-	 * 
+	 *
 	 * @return Size, by aggregating over all maps.
 	 */
 	public int computeSize() {
 		int size = 0;
-		for (Iterator<MutableShortLongMap> it = topmap.iterator(); it.hasNext();) {
-			size += it.next().size();
+		for (Short2LongOpenHashMap m : topmap.values()) {
+			size += m.size();
 		}
 		return size;
 	}

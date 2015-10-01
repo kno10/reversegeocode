@@ -33,9 +33,6 @@ import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.gs.collections.api.map.primitive.MutableLongObjectMap;
-import com.gs.collections.impl.map.mutable.primitive.LongObjectHashMap;
-
 import crosby.binary.BinaryParser;
 import crosby.binary.Osmformat.DenseNodes;
 import crosby.binary.Osmformat.HeaderBlock;
@@ -44,6 +41,8 @@ import crosby.binary.Osmformat.Relation;
 import crosby.binary.Osmformat.Relation.MemberType;
 import crosby.binary.Osmformat.Way;
 import crosby.binary.file.BlockInputStream;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 /**
  * Since I have machines with 32 GB RAM, I did not perform a whole lot of
@@ -51,20 +50,20 @@ import crosby.binary.file.BlockInputStream;
  * memory, e.g. by first processing relations only to identify ways to keep,
  * then scanning for ways only, and then reading matching nodes in the last
  * pass.
- * 
+ *
  * Theoretically, you could use Osmosis --used-way --used-node for this, but
  * this produced incomplete results for me, unfortunately.
- * 
+ *
  * This version reduces the precision to 0.0001 degree, about 11 meter at
  * equator. If we further increase the precision, we will not need more memory;
  * but the output file will be a lot larger; in particular some polygons get
  * much more detailed, and thus rendering gets slower and slower. (In fact, this
  * probably is already much more detailed than reasonable for our use case, and
  * the output files are 10x as large as {@link ParseOSM})
- * 
+ *
  * Second and third passes could be merged, assuming that the file is correctly
  * ordered (nodes first). But the two minutes extra don't matter much.
- * 
+ *
  * @author Erich Schubert
  */
 public class ParseOSMLong {
@@ -76,14 +75,14 @@ public class ParseOSMLong {
 	File infile, oufile;
 
 	/** Buffer storing all ways */
-	MutableLongObjectMap<long[]> ways = new LongObjectHashMap<long[]>();
+	Long2ObjectOpenHashMap<long[]> ways = new Long2ObjectOpenHashMap<long[]>();
 
 	/** Map containing node positions */
 	LongLongHierarchicalMap nodemap = new LongLongHierarchicalMap();
 
 	/**
 	 * Constructor
-	 * 
+	 *
 	 * @param inname
 	 *            Input file name
 	 * @param outname
@@ -242,9 +241,9 @@ public class ParseOSMLong {
 			LOG.info("Shrinking memory use.");
 			// Remove ways which are not needed, mark nodes that we do need.
 			ncounter = 0;
-			Iterator<long[]> it = ways.iterator();
+			Iterator<Long2ObjectMap.Entry<long[]>> it = ways.long2ObjectEntrySet().iterator();
 			while (it.hasNext()) {
-				final long[] data = it.next();
+				final long[] data = it.next().getValue();
 				final int l = data.length - 1;
 				if (data[l] == 0L) {
 					it.remove();

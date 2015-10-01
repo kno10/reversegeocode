@@ -29,7 +29,6 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -37,6 +36,17 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
+import javax.imageio.ImageIO;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
@@ -54,29 +64,15 @@ import javafx.scene.shape.Path;
 import javafx.scene.shape.PathElement;
 import javafx.stage.Stage;
 
-import javax.imageio.ImageIO;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.gs.collections.api.bag.primitive.MutableIntBag;
-import com.gs.collections.api.iterator.IntIterator;
-import com.gs.collections.api.map.primitive.IntObjectMap;
-import com.gs.collections.api.map.primitive.MutableIntObjectMap;
-import com.gs.collections.impl.bag.mutable.primitive.IntHashBag;
-import com.gs.collections.impl.list.mutable.primitive.FloatArrayList;
-import com.gs.collections.impl.map.mutable.primitive.IntObjectHashMap;
-import com.gs.collections.impl.set.mutable.UnifiedSet;
-
 /**
  * Build and encode the lookup index.
- * 
+ *
  * This is currently implemented using JavaFX to facilitate the polygon drawing.
  * For this reason, it needs to extend a JavaFX Application - this part of the
  * JavaFX API is just stupid...
- * 
+ *
  * TODO: make parameters configurable.
- * 
+ *
  * @author Erich Schubert
  */
 public class BuildLayeredIndex extends Application {
@@ -98,7 +94,7 @@ public class BuildLayeredIndex extends Application {
 	private int minLevel = 2, maxLevel = 10;
 
 	/** Entities read from the file */
-	private ArrayList<UnifiedSet<Entity>> entities;
+	private ArrayList<ObjectOpenHashSet<Entity>> entities;
 
 	/** Minimum size of objects to draw */
 	double minsize;
@@ -141,7 +137,7 @@ public class BuildLayeredIndex extends Application {
 			entities.add(null);
 		}
 		for (int i = minLevel; i <= maxLevel; i++) {
-			entities.add(new UnifiedSet<>());
+			entities.add(new ObjectOpenHashSet<>());
 		}
 
 		// Viewport on map
@@ -205,21 +201,20 @@ public class BuildLayeredIndex extends Application {
 					// Level not used.
 					continue;
 				}
-				UnifiedSet<Entity> levdata = entities.get(level);
+				ObjectOpenHashSet<Entity> levdata = entities.get(level);
 				if (levdata == null) {
 					// Level not used.
 					continue;
 				}
 				Entity exist = levdata.get(ent);
 				if (exist != null) {
-					exist.bb.update(bb);
-					exist.polys.add(points.toArray());
+					exist.polys.add(points.toFloatArray());
 					++polycount;
 				} else {
 					levdata.add(ent);
 					ent.bb = new BoundingBox(bb);
-					ent.polys = new LinkedList<>();
-					ent.polys.add(points.toArray());
+					ent.polys = new ArrayList<>(1);
+					ent.polys.add(points.toFloatArray());
 					++polycount;
 					++ecounter;
 				}
@@ -239,7 +234,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Render the polygons onto the "winner" map.
-	 * 
+	 *
 	 * @param stage
 	 *            Empty JavaFX stage used for rendering
 	 */
@@ -249,7 +244,7 @@ public class BuildLayeredIndex extends Application {
 		Scene scene = new Scene(rootGroup, blocksize, blocksize, Color.BLACK);
 		WritableImage writableImage = null; // Buffer
 
-		MutableIntObjectMap<String> meta = new IntObjectHashMap<>();
+		Int2ObjectOpenHashMap<String> meta = new Int2ObjectOpenHashMap<>();
 		meta.put(0, ""); // Note: deliberately not \0 terminated.
 		int entnum = 1;
 
@@ -331,7 +326,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Transfer pixels from the rendering buffer to the winner/alpha maps.
-	 * 
+	 *
 	 * @param img
 	 *            Rendering buffer
 	 * @param x1
@@ -370,7 +365,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Flatten multiple layers of "winners".
-	 * 
+	 *
 	 * @param winners
 	 *            Input layers
 	 * @param winner
@@ -381,32 +376,36 @@ public class BuildLayeredIndex extends Application {
 	 *            Reduce metadata
 	 */
 	private void flatten(int[][] winners, int[][] winner,
-			MutableIntObjectMap<String> meta) {
-		MutableIntObjectMap<MutableIntBag> parents = new IntObjectHashMap<>();
+			Int2ObjectOpenHashMap<String> meta) {
+		Int2ObjectOpenHashMap<Int2IntOpenHashMap> parents = new Int2ObjectOpenHashMap<>();
 		for (int y = 0; y < viewport.height; y++) {
 			for (int x = 0; x < viewport.width; x++) {
 				int id = winner[y][x] & 0xFFFFFF; // top byte is alpha!
 				if (id > 0) {
-					parents.getIfAbsentPut(id, IntHashBag::new)//
-							.add(winners[y][x]);
+					Int2IntOpenHashMap map = parents.get(id);
+					if (map == null) {
+					  parents.put(id, map = new Int2IntOpenHashMap());
+					}
+					map.addTo(winners[y][x], 1);
 				}
 			}
 		}
 		// Find the most frequent parent:
-		parents.forEachKeyValue((i, b) -> {
-			int best = -1, bcount = -1;
-			for (IntIterator it = b.intIterator(); it.hasNext();) {
-				int p = it.next(), c = b.occurrencesOf(p);
-				if (c > bcount || (c == bcount && p < best)) {
+		for (Int2ObjectMap.Entry<Int2IntOpenHashMap> en : parents.int2ObjectEntrySet()) {
+		  int best = -1, bcount = -1;
+		  for (Int2IntMap.Entry p : en.getValue().int2IntEntrySet()) {
+				final int c = p.getIntValue();
+        if (c > bcount || (c == bcount && c < best)) {
 					bcount = c;
-					best = p;
+					best = p.getIntKey();
 				}
 			}
 			if (best > 0) {
+			  final int i = en.getIntKey();
 				meta.put(i, meta.get(i) /* 0 terminated! *///
 						+ meta.get(best) /* 0 terminated */);
 			}
-		});
+		};
 		for (int y = 0; y < viewport.height; y++) {
 			for (int x = 0; x < viewport.width; x++) {
 				int id = winner[y][x] & 0xFFFFFF; // top byte is alpha!
@@ -419,13 +418,13 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Build the output index file.
-	 * 
+	 *
 	 * @param meta
 	 *            Metadata
 	 * @param winner
 	 *            Winner array
 	 */
-	private void buildIndex(IntObjectMap<String> meta, int[][] winner) {
+	private void buildIndex(Int2ObjectMap<String> meta, int[][] winner) {
 		int[] map = new int[meta.size()];
 		// Scan pixels for used indexes.
 		for (int y = 0; y < viewport.height; y++) {
@@ -525,7 +524,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Encode a line of the output image map.
-	 * 
+	 *
 	 * @param winner
 	 *            Image map
 	 * @param map
@@ -554,7 +553,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Write a single varint.
-	 * 
+	 *
 	 * @param buffer
 	 *            Buffer to write to
 	 * @param pos
@@ -576,7 +575,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Visualize the map.
-	 * 
+	 *
 	 * @param Maximum
 	 *            color
 	 * @param winner
@@ -609,7 +608,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * An entity on the map.
-	 * 
+	 *
 	 * @author Erich Schubert
 	 */
 	public static class Entity implements Comparable<Entity> {
@@ -652,7 +651,7 @@ public class BuildLayeredIndex extends Application {
 
 	/**
 	 * Launch, as JavaFX application.
-	 * 
+	 *
 	 * @param args
 	 *            Parameters
 	 */

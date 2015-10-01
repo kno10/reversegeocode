@@ -74,9 +74,9 @@
 					<systemPath>/usr/share/maven-repo/com/google/protobuf/protobuf-java/2.6.1/protobuf-java-2.6.1.jar</systemPath>
 				</dependency>
 				<dependency>
-					<groupId>com.goldmansachs</groupId>
-					<artifactId>gs-collections</artifactId>
-					<version>5.1.0</version>
+					<groupId>it.unimi.dsi</groupId>
+					<artifactId>fastutil</artifactId>
+					<version>7.0.7</version>
 				</dependency>
 				<dependency>
 					<groupId>javafx</groupId>
@@ -168,7 +168,7 @@
 					<scope>provided</scope>
 				</dependency>
 			</dependencies>
-			
+
 		</profile>
 	</profiles>
 </project>
