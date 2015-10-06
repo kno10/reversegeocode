@@ -24,6 +24,8 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -77,6 +79,9 @@ public class ParseOSM {
 
 	/** Map containing node positions */
 	LongIntHierarchicalMap nodemap = new LongIntHierarchicalMap();
+
+  /** Decimal format */
+  DecimalFormat nf = new DecimalFormat("#.##", DecimalFormatSymbols.getInstance(Locale.ROOT));
 
 	/**
 	 * Constructor
@@ -406,7 +411,7 @@ public class ParseOSM {
 					int wp = 0;
 					for (int i = 0; i < rcount; i++) {
 						id += w.getRefs(i);
-						int cur = nodemap.getIfAbsent(id, Integer.MIN_VALUE);
+						int cur = nodemap.getOrDefault(id, Integer.MIN_VALUE);
 						if (cur == Integer.MIN_VALUE) {
 							++mnode;
 							// LOG.info("Missing node: {}", id);
@@ -416,8 +421,10 @@ public class ParseOSM {
 							continue;
 						}
 						double lon = decodeLon(cur), lat = decodeLat(cur);
-						buf.append(String.format(Locale.ROOT, "\t%.2f,%.2f",
-								lon, lat));
+            buf.append('\t');
+            buf.append(nf.format(lon));
+            buf.append(',');
+            buf.append(nf.format(lat));
 						wp++;
 						last = cur;
 					}
@@ -504,10 +511,10 @@ public class ParseOSM {
 
 		public void appendToBuf(long[] nodes, int start) {
 			int last = start == 0 ? Integer.MIN_VALUE //
-					: nodemap.getIfAbsent(nodes[start - 1], Integer.MIN_VALUE);
+					: nodemap.getOrDefault(nodes[start - 1], Integer.MIN_VALUE);
 			for (int j = start, end = nodes.length - 1; j < end; j++) {
 				long nid = nodes[j];
-				int cur = nodemap.getIfAbsent(nid, Integer.MIN_VALUE);
+				int cur = nodemap.getOrDefault(nid, Integer.MIN_VALUE);
 				if (cur == Integer.MIN_VALUE) {
 					// buf.append("\tmissing");
 					++mnode;
@@ -518,17 +525,20 @@ public class ParseOSM {
 					continue;
 				}
 				double lon = decodeLon(cur), lat = decodeLat(cur);
-				buf.append(String.format(Locale.ROOT, "\t%.2f,%.2f", lon, lat));
+        buf.append('\t');
+        buf.append(nf.format(lon));
+        buf.append(',');
+        buf.append(nf.format(lat));
 				last = cur;
 			}
 		}
 
 		public void appendToBufReverse(long[] nodes) {
-			int last = nodemap.getIfAbsent(nodes[nodes.length - 2],
+			int last = nodemap.getOrDefault(nodes[nodes.length - 2],
 					Integer.MIN_VALUE);
 			for (int j = nodes.length - 3; j >= 0; j--) {
 				long nid = nodes[j];
-				int cur = nodemap.getIfAbsent(nid, Integer.MIN_VALUE);
+				int cur = nodemap.getOrDefault(nid, Integer.MIN_VALUE);
 				if (cur == Integer.MIN_VALUE) {
 					++mnode;
 					// LOG.info("Missing node: {}", nid);
@@ -538,7 +548,10 @@ public class ParseOSM {
 					continue;
 				}
 				double lon = decodeLon(cur), lat = decodeLat(cur);
-				buf.append(String.format(Locale.ROOT, "\t%.2f,%.2f", lon, lat));
+        buf.append('\t');
+        buf.append(nf.format(lon));
+        buf.append(',');
+        buf.append(nf.format(lat));
 				last = cur;
 			}
 		}

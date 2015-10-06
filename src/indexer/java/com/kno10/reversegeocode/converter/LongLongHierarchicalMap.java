@@ -95,7 +95,7 @@ class LongLongHierarchicalMap {
 	 *            Value to return when the key is not found.
 	 * @return Value stored, or {@code notfound}
 	 */
-	public long getIfAbsent(long id, long notfound) {
+	public long getOrDefault(long id, long notfound) {
 		int prefix = (int) (id >>> shift);
 		if (maxid > 0L && id >= maxid) {
 			throw new RuntimeException(

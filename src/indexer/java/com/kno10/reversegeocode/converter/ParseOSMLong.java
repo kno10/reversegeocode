@@ -24,6 +24,8 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -41,8 +43,6 @@ import crosby.binary.Osmformat.Relation;
 import crosby.binary.Osmformat.Relation.MemberType;
 import crosby.binary.Osmformat.Way;
 import crosby.binary.file.BlockInputStream;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 /**
  * Since I have machines with 32 GB RAM, I did not perform a whole lot of
@@ -67,655 +67,657 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author Erich Schubert
  */
 public class ParseOSMLong {
-	/** Class logger */
-	private static final Logger LOG = LoggerFactory
-			.getLogger(ParseOSMLong.class);
+  /** Class logger */
+  private static final Logger LOG = LoggerFactory.getLogger(ParseOSMLong.class);
 
-	/** Input and output files */
-	File infile, oufile;
+  /** Input and output files */
+  File infile, oufile;
 
-	/** Buffer storing all ways */
-	Long2ObjectOpenHashMap<long[]> ways = new Long2ObjectOpenHashMap<long[]>();
+  /** Buffer storing all ways */
+  LongObjectHierarchicalMap<long[]> ways = new LongObjectHierarchicalMap<long[]>();
 
-	/** Map containing node positions */
-	LongLongHierarchicalMap nodemap = new LongLongHierarchicalMap();
+  /** Map containing node positions */
+  LongLongHierarchicalMap nodemap = new LongLongHierarchicalMap();
 
-	/**
-	 * Constructor
-	 *
-	 * @param inname
-	 *            Input file name
-	 * @param outname
-	 *            Output file name
-	 */
-	public ParseOSMLong(String inname, String outname) {
-		super();
-		this.infile = new File(inname);
-		this.oufile = new File(outname);
-	}
+  /** Decimal format */
+  DecimalFormat nf = new DecimalFormat("#.####", DecimalFormatSymbols.getInstance(Locale.ROOT));
 
-	public void process() throws IOException {
-		{
-			long start = System.currentTimeMillis();
-			InputStream input = new FileInputStream(infile);
-			new BlockInputStream(input, new FirstPass()).process();
-			input.close();
-			long end = System.currentTimeMillis();
-			LOG.info("Runtime pass 1: {} s", (end - start) / 1000);
-		}
-		{
-			long start = System.currentTimeMillis();
-			InputStream input = new FileInputStream(infile);
-			new BlockInputStream(input, new SecondPass()).process();
-			input.close();
-			long end = System.currentTimeMillis();
-			LOG.info("Runtime pass 2: {} s", (end - start) / 1000);
-		}
-		{
-			long start = System.currentTimeMillis();
-			InputStream input = new FileInputStream(infile);
-			FileWriter output = new FileWriter(oufile);
-			new BlockInputStream(input, new ThirdPass(output)).process();
-			input.close();
-			output.flush();
-			output.close();
-			long end = System.currentTimeMillis();
-			LOG.info("Runtime pass 3: {} s", (end - start) / 1000);
-		}
-	}
+  /**
+   * Constructor
+   *
+   * @param inname Input file name
+   * @param outname Output file name
+   */
+  public ParseOSMLong(String inname, String outname) {
+    super();
+    this.infile = new File(inname);
+    this.oufile = new File(outname);
+  }
 
-	class FirstPass extends BinaryParser {
-		int ncounter = 0, wcounter = 0, rcounter = 0;
+  public void process() throws IOException {
+    {
+      long start = System.currentTimeMillis();
+      InputStream input = new FileInputStream(infile);
+      new BlockInputStream(input, new FirstPass()).process();
+      input.close();
+      long end = System.currentTimeMillis();
+      LOG.info("Runtime pass 1: {} s", (end - start) / 1000);
+    }
+    {
+      long start = System.currentTimeMillis();
+      InputStream input = new FileInputStream(infile);
+      new BlockInputStream(input, new SecondPass()).process();
+      input.close();
+      long end = System.currentTimeMillis();
+      LOG.info("Runtime pass 2: {} s", (end - start) / 1000);
+    }
+    {
+      long start = System.currentTimeMillis();
+      InputStream input = new FileInputStream(infile);
+      FileWriter output = new FileWriter(oufile);
+      new BlockInputStream(input, new ThirdPass(output)).process();
+      input.close();
+      output.flush();
+      output.close();
+      long end = System.currentTimeMillis();
+      LOG.info("Runtime pass 3: {} s", (end - start) / 1000);
+    }
+  }
 
-		@Override
-		protected void parseDense(DenseNodes nodes) {
-			if (nodes.getIdCount() == 0) {
-				return;
-			}
-			this.ncounter += nodes.getIdCount();
-			if (this.ncounter % 10000000 == 0) {
-				LOG.info("{} nodes skipped (first pass).", this.ncounter);
-			}
-		}
+  class FirstPass extends BinaryParser {
+    int ncounter = 0, wcounter = 0, rcounter = 0;
 
-		@Override
-		protected void parseNodes(List<Node> nodes) {
-			if (nodes.size() == 0) {
-				return;
-			}
-			this.ncounter += nodes.size();
-			if (this.ncounter % 10000000 == 0) {
-				LOG.info("{} nodes skipped (first pass).", this.ncounter);
-			}
-		}
+    @Override
+    protected void parseDense(DenseNodes nodes) {
+      if(nodes.getIdCount() == 0) {
+        return;
+      }
+      this.ncounter += nodes.getIdCount();
+      if(this.ncounter % 10000000 == 0) {
+        LOG.info("{} nodes skipped (first pass).", this.ncounter);
+      }
+    }
 
-		@Override
-		protected void parseWays(List<Way> ws) {
-			for (Way w : ws) {
-				int rcount = w.getRefsCount();
-				// Keep only the data we use.
-				long[] nodes = new long[rcount + 1];
-				long id = 0; // Delta coded!
-				for (int i = 0; i < rcount; i++) {
-					id += w.getRefs(i);
-					nodes[i] = id;
-				}
-				// Check for closed ways
-				if (nodes[0] == nodes[rcount - 1]) {
-					int kcount = w.getKeysCount();
-					for (int i = 0; i < kcount; i++) {
-						String key = getStringById(w.getKeys(i));
-						// TODO: be more selective in this pass already?
-						if ("admin_level".equals(key) || "boundary".equals(key)) {
-							nodes[rcount] |= 2;
-							break;
-						}
-					}
-				}
-				ways.put(w.getId(), nodes);
-				++wcounter;
-				if (wcounter % 1000000 == 0) {
-					LOG.info("{} ways read (first pass).", wcounter);
-				}
-			}
-		}
+    @Override
+    protected void parseNodes(List<Node> nodes) {
+      if(nodes.size() == 0) {
+        return;
+      }
+      this.ncounter += nodes.size();
+      if(this.ncounter % 10000000 == 0) {
+        LOG.info("{} nodes skipped (first pass).", this.ncounter);
+      }
+    }
 
-		@Override
-		protected void parseRelations(List<Relation> rels) {
-			for (Relation r : rels) {
-				parseRelation(r);
-				++this.rcounter;
-				if (this.rcounter % 1000000 == 0) {
-					LOG.info("{} relations read (first pass).", rcounter);
-				}
-			}
-		}
+    @Override
+    protected void parseWays(List<Way> ws) {
+      for(Way w : ws) {
+        int rcount = w.getRefsCount();
+        // Keep only the data we use.
+        long[] nodes = new long[rcount + 1];
+        long id = 0; // Delta coded!
+        for(int i = 0; i < rcount; i++) {
+          id += w.getRefs(i);
+          nodes[i] = id;
+        }
+        // Check for closed ways
+        if(nodes[0] == nodes[rcount - 1]) {
+          int kcount = w.getKeysCount();
+          for(int i = 0; i < kcount; i++) {
+            String key = getStringById(w.getKeys(i));
+            // TODO: be more selective in this pass already?
+            if("admin_level".equals(key) || "boundary".equals(key)) {
+              nodes[rcount] |= 2;
+              break;
+            }
+          }
+        }
+        ways.put(w.getId(), nodes);
+        ++wcounter;
+        if(wcounter % 1000000 == 0) {
+          LOG.info("{} ways read (first pass).", wcounter);
+        }
+      }
+    }
 
-		protected void parseRelation(Relation r) {
-			boolean keep = false;
-			int kcount = r.getKeysCount();
-			for (int i = 0; i < kcount; i++) {
-				String key = getStringById(r.getKeys(i));
-				// boundary=administrative
-				if ("admin_level".equals(key)) {
-					keep = true;
-					break;
-				}
-			}
-			if (!keep) {
-				return;
-			}
-			int mcount = r.getMemidsCount();
-			long id = 0; // Delta coded!
-			for (int i = 0; i < mcount; i++) {
-				id += r.getMemids(i);
-				if (r.getTypes(i) != MemberType.WAY) {
-					continue;
-				}
-				long[] nodes = ways.get(id);
-				if (nodes == null) {
-					LOG.info("Unknown way seen: {} in relation: {}", id,
-							r.getId());
-					continue;
-				}
-				// Mark as needed.
-				nodes[nodes.length - 1] |= 1;
-			}
-		}
+    @Override
+    protected void parseRelations(List<Relation> rels) {
+      for(Relation r : rels) {
+        parseRelation(r);
+        ++this.rcounter;
+        if(this.rcounter % 1000000 == 0) {
+          LOG.info("{} relations read (first pass).", rcounter);
+        }
+      }
+    }
 
-		@Override
-		protected void parse(HeaderBlock header) {
-			// Nothing to do.
-		}
+    protected void parseRelation(Relation r) {
+      boolean keep = false;
+      int kcount = r.getKeysCount();
+      for(int i = 0; i < kcount; i++) {
+        String key = getStringById(r.getKeys(i));
+        // boundary=administrative
+        if("admin_level".equals(key)) {
+          keep = true;
+          break;
+        }
+      }
+      if(!keep) {
+        return;
+      }
+      int mcount = r.getMemidsCount();
+      long id = 0; // Delta coded!
+      for(int i = 0; i < mcount; i++) {
+        id += r.getMemids(i);
+        if(r.getTypes(i) != MemberType.WAY) {
+          continue;
+        }
+        long[] nodes = ways.get(id);
+        if(nodes == null) {
+          LOG.info("Unknown way seen: {} in relation: {}", id, r.getId());
+          continue;
+        }
+        // Mark as needed.
+        nodes[nodes.length - 1] |= 1;
+      }
+    }
 
-		@Override
-		public void complete() {
-			LOG.info("{} nodes, {} ways, {} relations", //
-					ncounter, wcounter, rcounter);
-			Runtime rt = Runtime.getRuntime();
-			long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (before GC): {} MB", used);
-			System.gc();
-			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (after GC): {} MB", used);
-			LOG.info("Shrinking memory use.");
-			// Remove ways which are not needed, mark nodes that we do need.
-			ncounter = 0;
-			Iterator<Long2ObjectMap.Entry<long[]>> it = ways.long2ObjectEntrySet().iterator();
-			while (it.hasNext()) {
-				final long[] data = it.next().getValue();
-				final int l = data.length - 1;
-				if (data[l] == 0L) {
-					it.remove();
-					--wcounter;
-					continue;
-				}
-				for (int i = 0; i < l; i++) {
-					nodemap.put(data[i], Long.MIN_VALUE);
-					ncounter++;
-				}
-			}
-			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (before GC): {} MB", used);
-			System.gc();
-			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (after GC): {} MB", used);
-			LOG.info("{} nodes, {} ways, {} relations, nodes to collect: {}",
-					ncounter, wcounter, rcounter, nodemap.computeSize());
-			if (nodemap.computeSize() == 0) {
-				throw new RuntimeException("No nodes to keep.");
-			}
-		}
-	}
+    @Override
+    protected void parse(HeaderBlock header) {
+      // Nothing to do.
+    }
 
-	class SecondPass extends BinaryParser {
-		int ncounter = 0, n2counter = 0;
+    @Override
+    public void complete() {
+      LOG.info("{} nodes, {} ways, {} relations", //
+      ncounter, wcounter, rcounter);
+      Runtime rt = Runtime.getRuntime();
+      long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (before GC): {} MB", used);
+      System.gc();
+      used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (after GC): {} MB", used);
+      LOG.info("Shrinking memory use.");
+      // Remove ways which are not needed, mark nodes that we do need.
+      ncounter = 0;
+      for(Iterator<long[]> it = ways.valueIterator(); it.hasNext();) {
+        final long[] data = it.next();
+        final int l = data.length - 1;
+        if(data[l] == 0L) {
+          it.remove();
+          --wcounter;
+          continue;
+        }
+        for(int i = 0; i < l; i++) {
+          nodemap.put(data[i], Long.MIN_VALUE);
+          ncounter++;
+        }
+      }
+      used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (before GC): {} MB", used);
+      System.gc();
+      used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (after GC): {} MB", used);
+      LOG.info("{} nodes, {} ways, {} relations, nodes to collect: {}", ncounter, wcounter, rcounter, nodemap.computeSize());
+      if(nodemap.computeSize() == 0) {
+        throw new RuntimeException("No nodes to keep.");
+      }
+    }
+  }
 
-		@Override
-		protected void parseDense(DenseNodes nodes) {
-			long lastId = 0, lastLat = 0, lastLon = 0;
-			for (int i = 0; i < nodes.getIdCount(); i++) {
-				lastId += nodes.getId(i);
-				lastLat += nodes.getLat(i);
-				lastLon += nodes.getLon(i);
-				double lon = parseLon(lastLon), lat = parseLat(lastLat);
-				processNode(lastId, lon, lat);
-			}
-		}
+  class SecondPass extends BinaryParser {
+    int ncounter = 0, n2counter = 0;
 
-		@Override
-		protected void parseNodes(List<Node> nodes) {
-			for (Node n : nodes) {
-				double lon = parseLon(n.getLon()), lat = parseLat(n.getLat());
-				processNode(n.getId(), lon, lat);
-			}
-		}
+    @Override
+    protected void parseDense(DenseNodes nodes) {
+      long lastId = 0, lastLat = 0, lastLon = 0;
+      for(int i = 0; i < nodes.getIdCount(); i++) {
+        lastId += nodes.getId(i);
+        lastLat += nodes.getLat(i);
+        lastLon += nodes.getLon(i);
+        double lon = parseLon(lastLon), lat = parseLat(lastLat);
+        processNode(lastId, lon, lat);
+      }
+    }
 
-		protected void processNode(long id, double lon, double lat) {
-			++ncounter;
-			if (ncounter % 10000000 == 0) {
-				LOG.info("{} nodes processed (second pass).", ncounter);
-			}
-			if (!nodemap.containsKey(id)) {
-				return;
-			}
-			++n2counter;
-			nodemap.put(id, encodeLonLat(lon, lat));
-		}
+    @Override
+    protected void parseNodes(List<Node> nodes) {
+      for(Node n : nodes) {
+        double lon = parseLon(n.getLon()), lat = parseLat(n.getLat());
+        processNode(n.getId(), lon, lat);
+      }
+    }
 
-		@Override
-		protected void parseWays(List<Way> ws) {
-			// Ignore
-		}
+    protected void processNode(long id, double lon, double lat) {
+      ++ncounter;
+      if(ncounter % 10000000 == 0) {
+        LOG.info("{} nodes processed (second pass).", ncounter);
+      }
+      if(!nodemap.containsKey(id)) {
+        return;
+      }
+      ++n2counter;
+      nodemap.put(id, encodeLonLat(lon, lat));
+    }
 
-		@Override
-		protected void parseRelations(List<Relation> rels) {
-			// Ignore
-		}
+    @Override
+    protected void parseWays(List<Way> ws) {
+      // Ignore
+    }
 
-		@Override
-		protected void parse(HeaderBlock header) {
-			// Nothing to do.
-		}
+    @Override
+    protected void parseRelations(List<Relation> rels) {
+      // Ignore
+    }
 
-		@Override
-		public void complete() {
-			LOG.info("{} nodes, {} kept.", ncounter, n2counter);
-			Runtime rt = Runtime.getRuntime();
-			long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (before GC): {} MB", used);
-			System.gc();
-			used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
-			LOG.info("Memory consumption (after GC): {} MB", used);
-			if (n2counter == 0) {
-				throw new RuntimeException("No nodes were kept.");
-			}
-		}
-	}
+    @Override
+    protected void parse(HeaderBlock header) {
+      // Nothing to do.
+    }
 
-	public long encodeLonLat(double lon, double lat) {
-		// Round to 0.0001 precision (7 digits/6 digits)
-		// 0.0001 at equator = 11 meters
-		int ilon = (int) Math.round((lon + 180) * 10000);
-		int ilat = (int) Math.round((lat + 90) * 10000);
-		assert (ilon >= 0 && ilat >= 0);
-		long val = (((long) ilat) << 32) | (long) ilon;
-		return val;
-	}
+    @Override
+    public void complete() {
+      LOG.info("{} nodes, {} kept.", ncounter, n2counter);
+      Runtime rt = Runtime.getRuntime();
+      long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (before GC): {} MB", used);
+      System.gc();
+      used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption (after GC): {} MB", used);
+      if(n2counter == 0) {
+        throw new RuntimeException("No nodes were kept.");
+      }
+    }
+  }
 
-	public double decodeLon(long val) {
-		val &= 0x7FFF_FFFFL;
-		return (val * 0.0001) - 180.;
-	}
+  public long encodeLonLat(double lon, double lat) {
+    // Round to 0.0001 precision (7 digits/6 digits)
+    // 0.0001 at equator = 11 meters
+    int ilon = (int) Math.round((lon + 180) * 10000);
+    int ilat = (int) Math.round((lat + 90) * 10000);
+    assert(ilon >= 0 && ilat >= 0);
+    long val = (((long) ilat) << 32) | (long) ilon;
+    return val;
+  }
 
-	public double decodeLat(long val) {
-		val >>>= 32;
-		return (val * 0.0001) - 90.;
-	}
+  public double decodeLon(long val) {
+    val &= 0x7FFF_FFFFL;
+    return (val * 0.0001) - 180.;
+  }
 
-	class ThirdPass extends BinaryParser {
-		int ncounter = 0, wcounter = 0, rcounter = 0;
+  public double decodeLat(long val) {
+    val >>>= 32;
+    return (val * 0.0001) - 90.;
+  }
 
-		int mnode = 0;
+  class ThirdPass extends BinaryParser {
+    int ncounter = 0, wcounter = 0, rcounter = 0;
 
-		StringBuilder buf = new StringBuilder();
+    int mnode = 0;
 
-		ArrayList<long[]> fragments = new ArrayList<>();
+    StringBuilder buf = new StringBuilder();
 
-		Appendable output;
+    ArrayList<long[]> fragments = new ArrayList<>();
 
-		Metadata metadata = new Metadata();
+    Appendable output;
 
-		public ThirdPass(Appendable output) {
-			this.output = output;
-		}
+    Metadata metadata = new Metadata();
 
-		@Override
-		protected void parseDense(DenseNodes nodes) {
-			if (nodes.getIdCount() == 0) {
-				return;
-			}
-			this.ncounter += nodes.getIdCount();
-			if (this.ncounter % 10000000 == 0) {
-				LOG.info("{} nodes skipped (third pass).", ncounter);
-			}
-		}
+    public ThirdPass(Appendable output) {
+      this.output = output;
+    }
 
-		@Override
-		protected void parseNodes(List<Node> nodes) {
-			if (nodes.size() == 0) {
-				return;
-			}
-			this.ncounter += nodes.size();
-			if (this.ncounter % 10000000 == 0) {
-				LOG.info("{} nodes skipped (third pass).", ncounter);
-			}
-		}
+    @Override
+    protected void parseDense(DenseNodes nodes) {
+      if(nodes.getIdCount() == 0) {
+        return;
+      }
+      this.ncounter += nodes.getIdCount();
+      if(this.ncounter % 10000000 == 0) {
+        LOG.info("{} nodes skipped (third pass).", ncounter);
+      }
+    }
 
-		@Override
-		protected void parseWays(List<Way> ws) {
-			for (Way w : ws) {
-				long[] data = ways.get(w.getId());
-				if (data == null) {
-					continue;
-				}
-				metadata.reset(w);
-				if (metadata.accept()) {
-					buf.delete(0, buf.length());
-					metadata.append(buf);
-					final int rcount = w.getRefsCount();
-					long id = 0; // Delta coded!
-					long last = Long.MIN_VALUE;
-					int wp = 0;
-					for (int i = 0; i < rcount; i++) {
-						id += w.getRefs(i);
-						long cur = nodemap.getIfAbsent(id, Long.MIN_VALUE);
-						if (cur == Long.MIN_VALUE) {
-							++mnode;
-							// LOG.info("Missing node: {}", id);
-							continue;
-						}
-						if (cur == last) {
-							continue;
-						}
-						double lon = decodeLon(cur), lat = decodeLat(cur);
-						buf.append(String.format(Locale.ROOT, "\t%.2f,%.2f",
-								lon, lat));
-						wp++;
-						last = cur;
-					}
-					if (wp > 1 && id == w.getRefs(0)) { // Closed.
-						buf.append('\n');
-						try {
-							output.append(buf);
-						} catch (IOException e) { // Can't throw IO here.
-							throw new RuntimeException(e);
-						}
-					}
-				}
-				++wcounter;
-				if (wcounter % 1000000 == 0) {
-					LOG.info("{} ways read (third pass).", wcounter);
-				}
-			}
-		}
+    @Override
+    protected void parseNodes(List<Node> nodes) {
+      if(nodes.size() == 0) {
+        return;
+      }
+      this.ncounter += nodes.size();
+      if(this.ncounter % 10000000 == 0) {
+        LOG.info("{} nodes skipped (third pass).", ncounter);
+      }
+    }
 
-		@Override
-		protected void parseRelations(List<Relation> rels) {
-			for (Relation r : rels) {
-				parseRelation(r);
-				++this.rcounter;
-				if (this.rcounter % 1000000 == 0) {
-					LOG.info("{} relations read (third pass).", rcounter);
-				}
-			}
-		}
+    @Override
+    protected void parseWays(List<Way> ws) {
+      for(Way w : ws) {
+        long[] data = ways.get(w.getId());
+        if(data == null) {
+          continue;
+        }
+        metadata.reset(w);
+        if(metadata.accept()) {
+          buf.delete(0, buf.length());
+          metadata.append(buf);
+          final int rcount = w.getRefsCount();
+          long id = 0; // Delta coded!
+          long last = Long.MIN_VALUE;
+          int wp = 0;
+          for(int i = 0; i < rcount; i++) {
+            id += w.getRefs(i);
+            long cur = nodemap.getOrDefault(id, Long.MIN_VALUE);
+            if(cur == Long.MIN_VALUE) {
+              ++mnode;
+              // LOG.info("Missing node: {}", id);
+              continue;
+            }
+            if(cur == last) {
+              continue;
+            }
+            double lon = decodeLon(cur), lat = decodeLat(cur);
+            buf.append('\t');
+            buf.append(nf.format(lon));
+            buf.append(',');
+            buf.append(nf.format(lat));
+            wp++;
+            last = cur;
+          }
+          if(wp > 1 && id == w.getRefs(0)) { // Closed.
+            buf.append('\n');
+            try {
+              output.append(buf);
+            }
+            catch(IOException e) { // Can't throw IO here.
+              throw new RuntimeException(e);
+            }
+          }
+        }
+        ++wcounter;
+        if(wcounter % 1000000 == 0) {
+          LOG.info("{} ways read (third pass).", wcounter);
+        }
+      }
+    }
 
-		protected void parseRelation(Relation r) {
-			try {
-				boolean errors = false;
-				metadata.reset(r);
-				if (!metadata.accept()) {
-					return;
-				}
-				fragments.clear();
-				buf.delete(0, buf.length());
-				metadata.append(buf);
-				int trunk = buf.length(); // For re-truncating
-				int mcount = r.getMemidsCount();
-				long id = 0; // Delta coded!
-				for (int i = 0; i < mcount; i++) {
-					id += r.getMemids(i);
-					if (r.getTypes(i) != MemberType.WAY) {
-						continue;
-					}
-					long[] nodes = ways.get(id);
-					if (nodes == null) {
-						if (!errors) {
-							LOG.info(
-									"Unknown way seen: {} in relation: {} ({})",//
-									id, r.getId(), metadata.name);
-						}
-						errors = true;
-						continue;
-					}
-					// NOTE: ignoring the "role" for now, used inconsistently
-					// Note: last value is used for flags.
-					if (nodes[0] == nodes[nodes.length - 2]) {
-						int t2 = buf.length();
-						appendToBuf(nodes, 0);
-						if (buf.length() > t2) {
-							buf.append('\n');
-							output.append(buf);
-							buf.delete(trunk, buf.length());
-						}
-					} else {
-						fragments.add(nodes);
-					}
-				}
-				if (fragments.size() > 0) {
-					// Clear flags:
-					for (long[] way : fragments) {
-						way[way.length - 1] = 0L;
-					}
-					ringAssignment(fragments, r.getId(), trunk);
-				}
-			} catch (IOException e) { // Can't throw IO here.
-				throw new RuntimeException(e);
-			}
-		}
+    @Override
+    protected void parseRelations(List<Relation> rels) {
+      for(Relation r : rels) {
+        parseRelation(r);
+        ++this.rcounter;
+        if(this.rcounter % 1000000 == 0) {
+          LOG.info("{} relations read (third pass).", rcounter);
+        }
+      }
+    }
 
-		public void appendToBuf(long[] nodes, int start) {
-			long last = start == 0 ? Long.MIN_VALUE //
-					: nodemap.getIfAbsent(nodes[start - 1], Long.MIN_VALUE);
-			for (int j = start, end = nodes.length - 1; j < end; j++) {
-				long nid = nodes[j];
-				long cur = nodemap.getIfAbsent(nid, Long.MIN_VALUE);
-				if (cur == Long.MIN_VALUE) {
-					// buf.append("\tmissing");
-					++mnode;
-					// LOG.info("Missing node: {}", nid);
-					continue;
-				}
-				if (cur == last) {
-					continue;
-				}
-				double lon = decodeLon(cur), lat = decodeLat(cur);
-				buf.append(String.format(Locale.ROOT, "\t%.4f,%.4f", lon, lat));
-				last = cur;
-			}
-		}
+    protected void parseRelation(Relation r) {
+      try {
+        boolean errors = false;
+        metadata.reset(r);
+        if(!metadata.accept()) {
+          return;
+        }
+        fragments.clear();
+        buf.delete(0, buf.length());
+        metadata.append(buf);
+        int trunk = buf.length(); // For re-truncating
+        int mcount = r.getMemidsCount();
+        long id = 0; // Delta coded!
+        for(int i = 0; i < mcount; i++) {
+          id += r.getMemids(i);
+          if(r.getTypes(i) != MemberType.WAY) {
+            continue;
+          }
+          long[] nodes = ways.get(id);
+          if(nodes == null) {
+            if(!errors) {
+              LOG.info("Unknown way seen: {} in relation: {} ({})", //
+              id, r.getId(), metadata.name);
+            }
+            errors = true;
+            continue;
+          }
+          // NOTE: ignoring the "role" for now, used inconsistently
+          // Note: last value is used for flags.
+          if(nodes[0] == nodes[nodes.length - 2]) {
+            int t2 = buf.length();
+            appendToBuf(nodes, 0);
+            if(buf.length() > t2) {
+              buf.append('\n');
+              output.append(buf);
+              buf.delete(trunk, buf.length());
+            }
+          }
+          else {
+            fragments.add(nodes);
+          }
+        }
+        if(fragments.size() > 0) {
+          // Clear flags:
+          for(long[] way : fragments) {
+            way[way.length - 1] = 0L;
+          }
+          ringAssignment(fragments, r.getId(), trunk);
+        }
+      }
+      catch(IOException e) { // Can't throw IO here.
+        throw new RuntimeException(e);
+      }
+    }
 
-		public void appendToBufReverse(long[] nodes) {
-			long last = nodemap.getIfAbsent(nodes[nodes.length - 2],
-					Long.MIN_VALUE);
-			for (int j = nodes.length - 3; j >= 0; j--) {
-				long nid = nodes[j];
-				long cur = nodemap.getIfAbsent(nid, Long.MIN_VALUE);
-				if (cur == Long.MIN_VALUE) {
-					++mnode;
-					// LOG.info("Missing node: {}", nid);
-					continue;
-				}
-				if (cur == last) {
-					continue;
-				}
-				double lon = decodeLon(cur), lat = decodeLat(cur);
-				buf.append(String.format(Locale.ROOT, "\t%.4f,%.4f", lon, lat));
-				last = cur;
-			}
-		}
+    public void appendToBuf(long[] nodes, int start) {
+      long last = start == 0 ? Long.MIN_VALUE //
+      : nodemap.getOrDefault(nodes[start - 1], Long.MIN_VALUE);
+      for(int j = start, end = nodes.length - 1; j < end; j++) {
+        long nid = nodes[j];
+        long cur = nodemap.getOrDefault(nid, Long.MIN_VALUE);
+        if(cur == Long.MIN_VALUE) {
+          // buf.append("\tmissing");
+          ++mnode;
+          // LOG.info("Missing node: {}", nid);
+          continue;
+        }
+        if(cur == last) {
+          continue;
+        }
+        double lon = decodeLon(cur), lat = decodeLat(cur);
+        buf.append('\t');
+        buf.append(nf.format(lon));
+        buf.append(',');
+        buf.append(nf.format(lat));
+        last = cur;
+      }
+    }
 
-		protected void ringAssignment(Collection<long[]> fragments, long rid,
-				int trunk) throws IOException {
-			boolean errors = false;
-			for (long[] l : fragments) {
-				if (l[l.length - 1] != 0L) {
-					continue; // Already assigned.
-				}
-				l[l.length - 1] = 1; // Mark assigned.
-				long first = l[0], last = l[l.length - 2];
-				buf.delete(trunk, buf.length());
-				int t2 = buf.length();
-				appendToBuf(l, 0);
-				if (ringAssignment(fragments, rid, first, last)) {
-					if (buf.length() > t2) {
-						buf.append('\n');
-						output.append(buf);
-					}
-				} else {
-					buf.delete(trunk, buf.length());
-					if (!errors) {
-						LOG.debug(
-								"Could not close way {} - {} in relation {} ({})",
-								first, last, rid, metadata.name);
-					}
-					errors = true;
-				}
-			}
-		}
+    public void appendToBufReverse(long[] nodes) {
+      long last = nodemap.getOrDefault(nodes[nodes.length - 2], Long.MIN_VALUE);
+      for(int j = nodes.length - 3; j >= 0; j--) {
+        long nid = nodes[j];
+        long cur = nodemap.getOrDefault(nid, Long.MIN_VALUE);
+        if(cur == Long.MIN_VALUE) {
+          ++mnode;
+          // LOG.info("Missing node: {}", nid);
+          continue;
+        }
+        if(cur == last) {
+          continue;
+        }
+        double lon = decodeLon(cur), lat = decodeLat(cur);
+        buf.append('\t');
+        buf.append(nf.format(lon));
+        buf.append(',');
+        buf.append(nf.format(lat));
+        last = cur;
+      }
+    }
 
-		private boolean ringAssignment(Collection<long[]> fragments, long rid,
-				long stop, long cur) {
-			int trunk = buf.length();
-			for (long[] l : fragments) {
-				if (l[l.length - 1] != 0L) {
-					continue; // Already assigned.
-				}
-				long first = l[0], last = l[l.length - 2];
-				l[l.length - 1] = 1; // Mark assigned.
-				if (first == cur) {
-					appendToBuf(l, 1);
-					if (last == stop
-							|| ringAssignment(fragments, rid, stop, last)) {
-						return true;
-					} // else undo
-					buf.delete(trunk, buf.length());
-				} else if (last == cur) {
-					appendToBufReverse(l);
-					if (first == stop
-							|| ringAssignment(fragments, rid, stop, first)) {
-						return true;
-					} // else undo
-					buf.delete(trunk, buf.length());
-				}
-				l[l.length - 1] = 0; // Mark unassigned.
-			}
-			return false;
-		}
+    protected void ringAssignment(Collection<long[]> fragments, long rid, int trunk) throws IOException {
+      boolean errors = false;
+      for(long[] l : fragments) {
+        if(l[l.length - 1] != 0L) {
+          continue; // Already assigned.
+        }
+        l[l.length - 1] = 1; // Mark assigned.
+        long first = l[0], last = l[l.length - 2];
+        buf.delete(trunk, buf.length());
+        int t2 = buf.length();
+        appendToBuf(l, 0);
+        if(ringAssignment(fragments, rid, first, last)) {
+          if(buf.length() > t2) {
+            buf.append('\n');
+            output.append(buf);
+          }
+        }
+        else {
+          buf.delete(trunk, buf.length());
+          if(!errors) {
+            LOG.debug("Could not close way {} - {} in relation {} ({})", first, last, rid, metadata.name);
+          }
+          errors = true;
+        }
+      }
+    }
 
-		@Override
-		protected void parse(HeaderBlock header) {
-			// Nothing to do.
-		}
+    private boolean ringAssignment(Collection<long[]> fragments, long rid, long stop, long cur) {
+      int trunk = buf.length();
+      for(long[] l : fragments) {
+        if(l[l.length - 1] != 0L) {
+          continue; // Already assigned.
+        }
+        long first = l[0], last = l[l.length - 2];
+        l[l.length - 1] = 1; // Mark assigned.
+        if(first == cur) {
+          appendToBuf(l, 1);
+          if(last == stop || ringAssignment(fragments, rid, stop, last)) {
+            return true;
+          } // else undo
+          buf.delete(trunk, buf.length());
+        }
+        else if(last == cur) {
+          appendToBufReverse(l);
+          if(first == stop || ringAssignment(fragments, rid, stop, first)) {
+            return true;
+          } // else undo
+          buf.delete(trunk, buf.length());
+        }
+        l[l.length - 1] = 0; // Mark unassigned.
+      }
+      return false;
+    }
 
-		@Override
-		public void complete() {
-			LOG.info("{} nodes, {} ways, {} relations", //
-					ncounter, wcounter, rcounter);
-			LOG.info("Missing nodes: {}", mnode);
-		}
+    @Override
+    protected void parse(HeaderBlock header) {
+      // Nothing to do.
+    }
 
-		public class Metadata {
-			String levl = null, name = null, inam = null, wiki = null,
-					wikd = null, boun = null, plac = null, osid = null;
+    @Override
+    public void complete() {
+      LOG.info("{} nodes, {} ways, {} relations", //
+      ncounter, wcounter, rcounter);
+      LOG.info("Missing nodes: {}", mnode);
+    }
 
-			public void reset() {
-				levl = null;
-				name = null;
-				inam = null;
-				wiki = null;
-				wikd = null;
-				boun = null;
-				plac = null;
-				osid = null;
-			}
+    public class Metadata {
+      String levl = null, name = null, inam = null, wiki = null, wikd = null,
+          boun = null, plac = null, osid = null;
 
-			public void reset(Relation r) {
-				reset();
-				osid = "r" + r.getId();
-				int kcount = r.getKeysCount();
-				for (int i = 0; i < kcount; i++) {
-					String key = getStringById(r.getKeys(i));
-					String val = getStringById(r.getVals(i));
-					updateMetadata(key, val);
-				}
-			}
+      public void reset() {
+        levl = null;
+        name = null;
+        inam = null;
+        wiki = null;
+        wikd = null;
+        boun = null;
+        plac = null;
+        osid = null;
+      }
 
-			public void reset(Way w) {
-				reset();
-				osid = "w" + w.getId();
-				int kcount = w.getKeysCount();
-				for (int i = 0; i < kcount; i++) {
-					String key = getStringById(w.getKeys(i));
-					String val = getStringById(w.getVals(i));
-					updateMetadata(key, val);
-				}
-			}
+      public void reset(Relation r) {
+        reset();
+        osid = "r" + r.getId();
+        int kcount = r.getKeysCount();
+        for(int i = 0; i < kcount; i++) {
+          String key = getStringById(r.getKeys(i));
+          String val = getStringById(r.getVals(i));
+          updateMetadata(key, val);
+        }
+      }
 
-			public void updateMetadata(String key, String val) {
-				if (key == null || val == null) {
-					return;
-				}
-				switch (key) {
-				case "admin_level":
-					levl = val;
-					break;
-				case "name":
-				case "place_name":
-					name = val;
-					break;
-				case "name:en":
-				case "place_name:en":
-					inam = val;
-					break;
-				case "int_name":
-					inam = (inam == null) ? val : inam;
-					break;
-				// Place is a type information
-				case "place":
-				case "de:place":
-				case "boundary_type":
-					plac = val;
-					break;
-				case "boundary":
-					boun = val;
-					break;
-				// Wikipedia and WikiData
-				case "wikipedia":
-					wiki = val;
-					break;
-				case "wikipedia:en":
-					wiki = (wiki == null) ? val : wiki;
-					break;
-				case "wikidata":
-					wikd = val;
-					break;
-				}
-			}
+      public void reset(Way w) {
+        reset();
+        osid = "w" + w.getId();
+        int kcount = w.getKeysCount();
+        for(int i = 0; i < kcount; i++) {
+          String key = getStringById(w.getKeys(i));
+          String val = getStringById(w.getVals(i));
+          updateMetadata(key, val);
+        }
+      }
 
-			public boolean accept() {
-				return levl != null && name != null
-						&& "administrative".equals(boun);
-			}
+      public void updateMetadata(String key, String val) {
+        if(key == null || val == null) {
+          return;
+        }
+        switch(key){
+        case "admin_level":
+          levl = val;
+          break;
+        case "name":
+        case "place_name":
+          name = val;
+          break;
+        case "name:en":
+        case "place_name:en":
+          inam = val;
+          break;
+        case "int_name":
+          inam = (inam == null) ? val : inam;
+          break;
+        // Place is a type information
+        case "place":
+        case "de:place":
+        case "boundary_type":
+          plac = val;
+          break;
+        case "boundary":
+          boun = val;
+          break;
+        // Wikipedia and WikiData
+        case "wikipedia":
+          wiki = val;
+          break;
+        case "wikipedia:en":
+          wiki = (wiki == null) ? val : wiki;
+          break;
+        case "wikidata":
+          wikd = val;
+          break;
+        }
+      }
 
-			public void append(StringBuilder buf) {
-				buf.append(name);
-				buf.append('\t').append(inam == null ? name : inam);
-				buf.append('\t').append(plac == null ? "" : plac);
-				buf.append('\t').append(wiki == null ? "" : wiki);
-				buf.append('\t').append(wikd == null ? "" : wikd);
-				buf.append('\t').append(osid);
-				buf.append('\t').append(levl);
-			}
-		}
-	}
+      public boolean accept() {
+        return levl != null && name != null && "administrative".equals(boun);
+      }
 
-	public static void main(String[] args) {
-		try {
-			new ParseOSMLong(args[0], args[1]).process();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
+      public void append(StringBuilder buf) {
+        buf.append(name);
+        buf.append('\t').append(inam == null ? name : inam);
+        buf.append('\t').append(plac == null ? "" : plac);
+        buf.append('\t').append(wiki == null ? "" : wiki);
+        buf.append('\t').append(wikd == null ? "" : wikd);
+        buf.append('\t').append(osid);
+        buf.append('\t').append(levl);
+      }
+    }
+  }
+
+  public static void main(String[] args) {
+    try {
+      new ParseOSMLong(args[0], args[1]).process();
+    }
+    catch(IOException e) {
+      e.printStackTrace();
+    }
+  }
 }
