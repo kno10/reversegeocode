@@ -85,10 +85,10 @@ public class BuildLayeredIndex extends Application {
 
 	/** Pattern for matching coordinates */
 	Pattern coordPattern = Pattern
-			.compile("(?<=\t)(-?\\d+(?:\\.\\d*)),(-?\\d+(?:\\.\\d*))(?=\t|$)");
+			.compile("(?<=\\t)(-?\\d+(?:\\.\\d*)?),(-?\\d+(?:\\.\\d*)?)(?=\\t|$)");
 
 	/** Pattern for recognizing the level */
-	Pattern levelPattern = Pattern.compile("(?<=\t)(\\d+)(?=\t)");
+	Pattern levelPattern = Pattern.compile("(?<=\\t)(\\d+)(?=\\t)");
 
 	/** Minimum and maximum level */
 	private int minLevel = 2, maxLevel = 10;
@@ -173,7 +173,7 @@ public class BuildLayeredIndex extends Application {
 				String meta = null;
 				lm.reset(line);
 				if (!lm.find()) {
-					LOG.warn("Line was not matched: {}", line);
+					LOG.warn("No admin level found in polygon: {}", line);
 					continue;
 				}
 				// We keep metadata 0-terminated as seperator!
@@ -190,7 +190,7 @@ public class BuildLayeredIndex extends Application {
 					bb.update(lon, lat);
 				}
 				if (points.size() == 0) {
-					LOG.warn("Line was not matched: {}", line);
+					LOG.warn("Polygon was empty: {}", line);
 					continue;
 				}
 				if (bb.size() < minsize) {
@@ -209,6 +209,7 @@ public class BuildLayeredIndex extends Application {
 				Entity exist = levdata.get(ent);
 				if (exist != null) {
 					exist.polys.add(points.toFloatArray());
+					exist.bb.update(bb);
 					++polycount;
 				} else {
 					levdata.add(ent);
@@ -239,6 +240,7 @@ public class BuildLayeredIndex extends Application {
 	 *            Empty JavaFX stage used for rendering
 	 */
 	public void render(Stage stage) {
+    Runtime rt = Runtime.getRuntime();
 		final int blocksize = 1024;
 		Group rootGroup = new Group();
 		Scene scene = new Scene(rootGroup, blocksize, blocksize, Color.BLACK);
@@ -255,7 +257,9 @@ public class BuildLayeredIndex extends Application {
 			if (entities.get(lev) == null) {
 				continue;
 			}
-			LOG.info("Rendering level {}", lev);
+      long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+      LOG.info("Memory consumption: {} MB", used);
+			LOG.info("Rendering level {} ({} entities)", lev, entities.get(lev).size());
 			for (int y = 0; y < viewport.height; y++) {
 				Arrays.fill(winner[y], 0);
 			}
@@ -280,6 +284,7 @@ public class BuildLayeredIndex extends Application {
 						(int) Math.ceil(viewport.projLat(e.bb.latmin)) - 1);
 				int ymax = Math.min(viewport.height,
 						(int) Math.floor(viewport.projLat(e.bb.latmax)) + 1);
+
 				// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
 				for (int x1 = xmin; x1 < xmax; x1 += blocksize) {
 					int x2 = Math.min(x1 + blocksize, xmax);
@@ -582,6 +587,7 @@ public class BuildLayeredIndex extends Application {
 	 *            Winners array
 	 */
 	public void visualize(int max, int[][] winner) {
+    LOG.warn("Producing visualization.");
 		// Randomly assign colors for visualization:
 		Random r = new Random();
 		int[] cols = new int[max + 1];
