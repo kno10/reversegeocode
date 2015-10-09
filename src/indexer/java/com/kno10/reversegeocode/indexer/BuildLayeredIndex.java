@@ -275,15 +275,23 @@ public class BuildLayeredIndex extends Application {
 					continue;
 				}
 
-				// Area to inspect
-				int xmin = Math.max(0,
-						(int) Math.floor(viewport.projLon(e.bb.lonmin)) - 1);
-				int xmax = Math.min(viewport.width,
-						(int) Math.ceil(viewport.projLon(e.bb.lonmax)) + 1);
-				int ymin = Math.max(0,
-						(int) Math.ceil(viewport.projLat(e.bb.latmin)) - 1);
-				int ymax = Math.min(viewport.height,
-						(int) Math.floor(viewport.projLat(e.bb.latmax)) + 1);
+        // Project bounding box:
+        final int pxmin = (int) Math.floor(viewport.projLon(e.bb.lonmin));
+        final int pxmax = (int) Math.ceil(viewport.projLon(e.bb.lonmax));
+        if(pxmax < 0 || pxmin > viewport.width) {
+          continue;
+        }
+        final int pymin = (int) Math.ceil(viewport.projLat(e.bb.latmin));
+        final int pymax = (int) Math.floor(viewport.projLat(e.bb.latmax));
+        if(pymax < 0 || pymin > viewport.height) {
+          continue;
+        }
+
+        // Rendering area:
+        int xmin = Math.max(0, pxmin - 1);
+        int xmax = Math.min(viewport.width, pxmax + 1);
+        int ymin = Math.max(0, pymin - 1);
+        int ymax = Math.min(viewport.height, pymax + 1);
 
 				// System.out.format("%d-%d %d-%d; ", xmin, xmax, ymin, ymax);
 				for (int x1 = xmin; x1 < xmax; x1 += blocksize) {
