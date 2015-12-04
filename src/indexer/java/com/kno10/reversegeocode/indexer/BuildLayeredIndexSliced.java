@@ -43,10 +43,8 @@ import org.slf4j.LoggerFactory;
 
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.ints.AbstractIntComparator;
-import it.unimi.dsi.fastutil.ints.Int2IntMap;
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2LongMap;
+import it.unimi.dsi.fastutil.ints.Int2LongOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrays;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import javafx.application.Application;
@@ -100,6 +98,9 @@ public class BuildLayeredIndexSliced extends Application {
   /** Entities read from the file */
   private ArrayList<ObjectOpenHashSet<Entity>> entities;
 
+  /** Number of entites (starting at 1 - 0 is reserved) */
+  private int ecounter = 1;
+
   /** Minimum size of objects to draw */
   double minsize;
 
@@ -151,8 +152,10 @@ public class BuildLayeredIndexSliced extends Application {
     v = named.get("resolution");
     double resolution = v != null ? Double.valueOf(v) : 0.001;
     // TODO: make clipping configurable.
-    this.gviewport = new Viewport(360., 140., 180., 60., resolution);
+    // this.gviewport = new Viewport(360., 140., 180., 60., resolution);
+    this.gviewport = new Viewport(360., 150., 180., 65., resolution);
     // this.gviewport = new Viewport(360., 180., 180., 90., resolution);
+    // this.gviewport = new Viewport(60., 60., 0., 0., resolution);
 
     // Minimum size of bounding box.
     v = named.get("minsize");
@@ -167,7 +170,8 @@ public class BuildLayeredIndexSliced extends Application {
     FloatArrayList points = new FloatArrayList();
     BoundingBox bb = new BoundingBox();
 
-    int polycount = 0, lines = 0, ecounter = 0;
+    int polycount = 0, lines = 0;
+    ecounter = 1;
     // Everybody just "loves" such Java constructs...
     try (
         BufferedReader b = new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(infile))))) {
@@ -220,7 +224,7 @@ public class BuildLayeredIndexSliced extends Application {
           ++polycount;
         }
         else {
-          Entity ent = new Entity(meta, ++ecounter);
+          Entity ent = new Entity(meta, ecounter++);
           levdata.add(ent);
           ent.bb = new BoundingBox(bb);
           ent.polys = new ArrayList<>(1);
@@ -258,7 +262,10 @@ public class BuildLayeredIndexSliced extends Application {
     WritableImage writableImage = null; // Buffer
 
     // Parent entity counts:
-    Int2ObjectOpenHashMap<Int2IntOpenHashMap> parents = new Int2ObjectOpenHashMap<>();
+    Int2LongOpenHashMap[] parents = new Int2LongOpenHashMap[ecounter];
+    for(int i = 1; i < parents.length; i++) {
+      parents[i] = new Int2LongOpenHashMap();
+    }
 
     /** Compressed storage */
     byte[][] comp = new byte[gviewport.height][];
@@ -267,14 +274,14 @@ public class BuildLayeredIndexSliced extends Application {
     final int numslices = (int) Math.ceil(gviewport.height / (double) sliceheight);
     int totalsize = 0;
     LOG.info("Rendering in {} slices.", numslices);
-    int[][] winners = new int[sliceheight][gviewport.width];
-    int[][] winner = new int[sliceheight][gviewport.width];
+    int[][] slice = new int[sliceheight][gviewport.width];
+    int[][] layer = new int[sliceheight][gviewport.width];
     long start = System.currentTimeMillis();
     for(int slicestart = 0, slicenum = 1; slicestart < gviewport.height; slicestart += sliceheight, slicenum++) {
       long sstart = System.currentTimeMillis();
       LOG.info("Rendering slice {} / {}", slicenum, numslices);
       for(int y = 0; y < sliceheight; y++) {
-        Arrays.fill(winners[y], 0);
+        Arrays.fill(slice[y], 0);
       }
       Viewport sviewport = new Viewport(gviewport, 0, slicestart, gviewport.width, sliceheight);
       for(int lev = minLevel; lev <= maxLevel; lev++) {
@@ -285,7 +292,7 @@ public class BuildLayeredIndexSliced extends Application {
         long used = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
         LOG.info("Rendering level {} ({} entities, {} MB used)", lev, entities.get(lev).size(), used);
         for(int y = 0; y < sliceheight; y++) {
-          Arrays.fill(winner[y], 0);
+          Arrays.fill(layer[y], 0);
         }
 
         // Sort by size.
@@ -309,6 +316,10 @@ public class BuildLayeredIndexSliced extends Application {
           final int pymin = (int) Math.ceil(sviewport.projLat(e.bb.latmin));
           final int pymax = (int) Math.floor(sviewport.projLat(e.bb.latmax));
           if(pymax < 0 || sviewport.height < pymin) {
+            continue;
+          }
+          // At most one pixel.
+          if(pxmax == pxmin && pymax == pymin && minsize > 1) {
             continue;
           }
 
@@ -342,17 +353,17 @@ public class BuildLayeredIndexSliced extends Application {
               rootGroup.getChildren().remove(path);
 
               transferPixels(writableImage, x1, x2, y1, y2, //
-              winner, e.num);
+              layer, e.num);
             }
           }
           ++drawn;
         }
         if(drawn > 0) {
-          flatten(winners, winner, parents, sviewport);
+          flatten(slice, layer, parents, sviewport);
         }
         LOG.info("Level rendering time: {} ms {} entities", System.currentTimeMillis() - lstart, drawn);
       }
-      int slicesize = compress(winners, comp, slicestart);
+      int slicesize = compress(slice, comp, slicestart);
       totalsize += slicesize;
       LOG.info("Slice rendering time: {} ms, {} bytes compressed ({} aggregated)", System.currentTimeMillis() - sstart, slicesize, totalsize);
     }
@@ -370,14 +381,14 @@ public class BuildLayeredIndexSliced extends Application {
    * @param x2 Right
    * @param y1 Bottom
    * @param y2 Top
-   * @param winner Output array
+   * @param layer Output array
    * @param c Entity number
    */
-  public void transferPixels(WritableImage img, int x1, int x2, int y1, int y2, int[][] winner, int c) {
+  public void transferPixels(WritableImage img, int x1, int x2, int y1, int y2, int[][] layer, int c) {
     assert (c > 0);
     PixelReader reader = img.getPixelReader();
     for(int y = y1, py = 0; y < y2; y++, py++) {
-      final int[] rowy = winner[y];
+      final int[] rowy = layer[y];
       for(int x = x1, px = 0; x < x2; x++, px++) {
         int col = reader.getArgb(px, py);
         int alpha = (col & 0xFF);
@@ -396,38 +407,25 @@ public class BuildLayeredIndexSliced extends Application {
   }
 
   /**
-   * Flatten multiple layers of "winners".
+   * Flatten another layers onto a slice.
    *
-   * @param winners Input layers
-   * @param winner Output array
+   * @param slice Output slice
+   * @param layer Input layer
    * @param parents Parents map
    * @param meta Reduce metadata
    * @param viewport Viewport
    */
-  private void flatten(int[][] winners, int[][] winner, Int2ObjectOpenHashMap<Int2IntOpenHashMap> parents, Viewport viewport) {
+  private void flatten(int[][] slice, int[][] layer, Int2LongOpenHashMap[] parents, Viewport viewport) {
     // Count the most frequent parent for each entity.
     for(int y = 0; y < viewport.height; y++) {
-      final int[] rowy = winner[y], outy = winners[y];
+      final int[] rowy = layer[y], outy = slice[y];
       for(int x = 0; x < viewport.width; x++) {
         int id = rowy[x] & 0x00FF_FFFF; // top byte is alpha!
         if(id == 0) {
           continue;
         }
-        Int2IntOpenHashMap map = parents.get(id);
-        if(map == null) {
-          parents.put(id, map = new Int2IntOpenHashMap());
-        }
-        map.addTo(outy[x], 1);
-      }
-    }
-    // Copy output entities to target array.
-    for(int y = 0; y < viewport.height; y++) {
-      final int[] rowy = winner[y], outy = winners[y];
-      for(int x = 0; x < viewport.width; x++) {
-        int id = rowy[x] & 0x00FF_FFFF; // top byte is alpha!
-        if(id > 0) {
-          outy[x] = id;
-        }
+        parents[id].addTo(outy[x], 1);
+        outy[x] = id;
       }
     }
   }
@@ -472,70 +470,55 @@ public class BuildLayeredIndexSliced extends Application {
    * @param parents Parent counters
    * @param rows Compressed index
    */
-  private void buildIndex(Int2ObjectOpenHashMap<Int2IntOpenHashMap> parents, byte[][] rows) {
-    // Build metadata first.
-    Int2ObjectOpenHashMap<String> meta = new Int2ObjectOpenHashMap<>();
-    meta.put(0, ""); // Note: deliberately not \0 terminated.
-    for(ObjectOpenHashSet<Entity> levdata : entities) {
-      if(levdata == null) {
-        continue;
-      }
-      for(Entity e : levdata) {
-        meta.put(e.num, e.key);
-      }
-    }
+  private void buildIndex(Int2LongOpenHashMap[] parents, byte[][] rows) {
+    Entity[] ents = flatEntities();
     // Find the most frequent parent of each entity:
-    int[] cnt = new int[meta.size()];
-    cnt[0] = Integer.MAX_VALUE;
-    for(Int2ObjectMap.Entry<Int2IntOpenHashMap> en : parents.int2ObjectEntrySet()) {
-      int best = -1, bcount = -1, total = 0;
-      for(Int2IntMap.Entry p : en.getValue().int2IntEntrySet()) {
-        final int c = p.getIntValue();
-        total += c;
-        if(c > bcount || (c == bcount && c < best)) {
-          bcount = c;
-          best = p.getIntKey();
-        }
-      }
-      final int i = en.getIntKey();
-      cnt[i] = total;
-      if(best <= 0) {
-        continue; // Top level.
-      }
-      meta.put(i, meta.get(i) /* 0 terminated! *///
-      + meta.get(best) /* 0 terminated */);
-    }
+    int[] parent = new int[parents.length];
+    long[] cnt = new long[parents.length];
+    findParent(parents, parent, cnt);
 
     int c = 0;
-    int[] map = new int[meta.size()];
-    String[] mmeta = new String[meta.size()];
+    int[] map = new int[parent.length];
+    String[] meta = new String[parent.length];
     Arrays.fill(map, -1);
     // Enumerate used indexes.
     {
-      int[] tmp = new int[meta.size()];
-      for(int i = 0; i < tmp.length; i++) {
-        tmp[i] = i;
-      }
-      // Indirect sort, descending:
-      IntArrays.quickSort(tmp, 1, tmp.length, new AbstractIntComparator() {
-        @Override
-        public int compare(int k1, int k2) {
-          return Integer.compare(cnt[k2], cnt[k1]);
-        }
-      });
-      LOG.info("Debug: {} > {} >= {} > {}", cnt[tmp[0]], cnt[tmp[1]], cnt[tmp[2]], cnt[tmp[tmp.length - 1]]);
-      for(int p : tmp) {
-        if(cnt[p] <= 0) {
+      int[] tmp = indirectSort(cnt);
+      meta[0] = "";
+      StringBuilder buf = new StringBuilder();
+      int i = 1;
+      for(; i < tmp.length; i++) {
+        int p = tmp[i];
+        if(cnt[p] < minsize) {
           break;
         }
         map[p] = c;
-        mmeta[c] = meta.get(p);
-        if (c <= 1) {
-          LOG.info("Meta: {} {}", c, mmeta[c]);
+        // Aggregate metadata:
+        buf.setLength(0);
+        for(int cur = p; cur > 0; cur = parent[cur]) {
+          buf.append(ents[cur].key /* 0 terminated! */);
+        }
+        meta[c] = buf.toString();
+        if(c >= 1 && c <= 10) {
+          LOG.info("Most frequent: {} {} {}", c, cnt[p], meta[c].replace('\0', '|'));
         }
         c++;
       }
-      LOG.info("Number of used entities: {}", c);
+      // The remaining elements will be mapped to the parent
+      for(; i < tmp.length; i++) {
+        int p = tmp[i];
+        if(cnt[p] == 0) {
+          break;
+        }
+        while(p != 0 && cnt[p] < minsize) {
+          p = parent[p];
+        }
+        map[i] = map[p]; // Map to the same value as the parent.
+      }
+      if(c > 0) {
+        LOG.info("Least frequent frequent: {} {}", c - 1, meta[c - 1].replace('\0', '|'));
+      }
+      LOG.info("Number of used entities: {} of {} / {}.", c - 1, i - 1, ecounter - 1);
     }
     byte[] buffer = new byte[gviewport.width * 8]; // Output buffer.
     // Scan pixels for used indexes.
@@ -555,7 +538,7 @@ public class BuildLayeredIndexSliced extends Application {
       // Encode the metadata
       byte[][] metadata = new byte[c][];
       for(int i = 0; i < c; i++) {
-        metadata[i] = mmeta[i].getBytes("UTF-8");
+        metadata[i] = meta[i].getBytes("UTF-8");
       }
 
       // Part 1: HEADER
@@ -613,8 +596,73 @@ public class BuildLayeredIndexSliced extends Application {
       LOG.error("IO error writing index.", e);
     }
     if(imfile != null) {
-      visualize(meta.size(), rows);
+      visualize(meta.length, rows);
     }
+  }
+
+  /**
+   * Indirect sort descendingly.
+   *
+   * @param cnt Count array
+   * @return Permutation, largest first
+   */
+  private static int[] indirectSort(long[] cnt) {
+    int[] tmp = new int[cnt.length];
+    for(int i = 0; i < tmp.length; i++) {
+      tmp[i] = i;
+    }
+    // Indirect sort, descending:
+    IntArrays.quickSort(tmp, 1, tmp.length, new AbstractIntComparator() {
+      private static final long serialVersionUID = 1L;
+
+      @Override
+      public int compare(int k1, int k2) {
+        return Long.compare(cnt[k2], cnt[k1]);
+      }
+    });
+    return tmp;
+  }
+
+  /**
+   * Find the parent entity for each.
+   *
+   * @param parents Parent counter map
+   * @param parent Parent storage (output)
+   * @param cnt Count storage (output)
+   */
+  private void findParent(Int2LongOpenHashMap[] parents, int[] parent, long[] cnt) {
+    parent[0] = 0;
+    cnt[0] = Long.MAX_VALUE;
+    for(int i = 1; i < parents.length; i++) {
+      int best = -1;
+      long total = 0, bcount = -1;
+      for(Int2LongMap.Entry p : parents[i].int2LongEntrySet()) {
+        final long c = p.getLongValue();
+        total += c;
+        if(c > bcount || (c == bcount && c < best)) {
+          bcount = c;
+          best = p.getIntKey();
+        }
+      }
+      cnt[i] = total;
+      parent[i] = best;
+    }
+  }
+
+  /**
+   * @return Flat array of all entities.
+   */
+  private Entity[] flatEntities() {
+    Entity[] pmeta = new Entity[ecounter];
+    pmeta[0] = new Entity("", 0); // Note: deliberately not \0 terminated.
+    for(ObjectOpenHashSet<Entity> levdata : entities) {
+      if(levdata != null) {
+        for(Entity e : levdata) {
+          pmeta[e.num] = e;
+        }
+      }
+    }
+    return pmeta;
   }
 
   /**
