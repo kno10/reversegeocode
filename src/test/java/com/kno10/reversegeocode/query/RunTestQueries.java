@@ -53,7 +53,7 @@ public class RunTestQueries {
         }
         System.out.append('\n');
       }
-      System.out.format(Locale.ROOT, "Number of entities: %d\n", rgc.numentries);
+      System.out.format(Locale.ROOT, "Number of entities: %d\n", rgc.getNumberOfEntries());
       rgc.close();
     }
     catch(IOException e) {

@@ -54,31 +54,31 @@ public class ReverseGeocoder implements AutoCloseable {
   private static final int HEADER_SIZE = 32;
 
   /** Decoder */
-  static final CharsetDecoder DECODER = Charset.forName("UTF-8").newDecoder();
+  private static final CharsetDecoder DECODER = Charset.forName("UTF-8").newDecoder();
 
   /** Empty array - no match */
   private static final String[] EMPTY = new String[0];
 
   /** File name */
-  File filename;
+  private File filename;
 
   /** Java file object */
-  RandomAccessFile file;
+  private RandomAccessFile file;
 
   /** Java memory map */
-  MappedByteBuffer buffer;
+  private MappedByteBuffer buffer;
 
   /** Map size */
-  int width, height;
+  private int width, height;
 
   /** Map extends */
-  float xscale, yscale, xshift, yshift;
+  private float xscale, yscale, xshift, yshift;
 
   /** Number of entries in the map. */
-  int numentries;
+  private int numentries;
 
   /** String cache, so we only have to decode UTF-8 once. */
-  String[][] cache;
+  private String[][] cache;
 
   /**
    * Constructor.
@@ -233,13 +233,26 @@ public class ReverseGeocoder implements AutoCloseable {
     }
   }
 
+  @SuppressWarnings("restriction")
   @Override
   public void close() throws IOException {
     cache = null;
-    buffer = null;
+    if(buffer != null) {
+      // Restricted API, but e.g. the JMH benchmarks fail if we do not unmap.
+      sun.misc.Cleaner cleaner = ((sun.nio.ch.DirectBuffer) buffer).cleaner();
+      cleaner.clean();
+      buffer = null;
+    }
     if(file != null) {
       file.close();
+      file = null;
     }
-    file = null;
+  }
+
+  /**
+   * @return The number of entries in the geocoder.
+   */
+  public int getNumberOfEntries() {
+    return numentries;
   }
 }
