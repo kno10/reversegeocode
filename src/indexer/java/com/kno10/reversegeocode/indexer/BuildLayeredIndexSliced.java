@@ -191,10 +191,10 @@ public class BuildLayeredIndexSliced extends Application {
         // We keep metadata 0-terminated as seperator!
         meta = line.substring(0, lm.end()) + '\0';
         int level = Integer.parseInt(lm.group(1));
-        assert (!lm.find());
+        // assert (!lm.find());
         m.reset(line);
         while(m.find()) {
-          assert (m.start() >= lm.end());
+          // assert (m.start() >= lm.end()) : "No match available: " + line;
           float lon = Float.parseFloat(m.group(1));
           float lat = Float.parseFloat(m.group(2));
           points.add(lon);
@@ -477,18 +477,19 @@ public class BuildLayeredIndexSliced extends Application {
     long[] cnt = new long[parents.length];
     findParent(parents, parent, cnt);
 
-    int c = 0;
+    int c = 1;
     int[] map = new int[parent.length];
     String[] meta = new String[parent.length];
+    meta[0] = "";
     Arrays.fill(map, -1);
+    map[0] = 0;
     // Enumerate used indexes.
     {
       int[] tmp = indirectSort(cnt);
-      meta[0] = "";
       StringBuilder buf = new StringBuilder();
       int i = 1;
       for(; i < tmp.length; i++) {
-        int p = tmp[i];
+        final int p = tmp[i];
         if(cnt[p] < minsize) {
           break;
         }
@@ -506,14 +507,21 @@ public class BuildLayeredIndexSliced extends Application {
       }
       // The remaining elements will be mapped to the parent
       for(; i < tmp.length; i++) {
-        int p = tmp[i];
+        final int p = tmp[i];
         if(cnt[p] == 0) {
           break;
         }
-        while(p != 0 && cnt[p] < minsize) {
-          p = parent[p];
+        assert (cnt[p] < minsize);
+        int pa = p;
+        while(pa != 0 && cnt[pa] < minsize && pa != parent[pa]) {
+          pa = parent[pa];
         }
-        map[i] = map[p]; // Map to the same value as the parent.
+        if(map[pa] <= 0) {
+          LOG.info("No usable parent for: {} {} {}", p, cnt[p], ents[p].key.replace('\0', '|'));
+          pa = 0;
+        }
+        assert (map[pa] >= 0);
+        map[p] = map[pa]; // Map to the same value as the parent.
       }
       if(c > 0) {
         LOG.info("Least frequent frequent: {} {}", c - 1, meta[c - 1].replace('\0', '|'));
@@ -611,7 +619,7 @@ public class BuildLayeredIndexSliced extends Application {
     for(int i = 0; i < tmp.length; i++) {
       tmp[i] = i;
     }
-    // Indirect sort, descending:
+    // Indirect sort, descending (no need to sort 0):
     IntArrays.quickSort(tmp, 1, tmp.length, new AbstractIntComparator() {
       private static final long serialVersionUID = 1L;
 
@@ -634,7 +642,7 @@ public class BuildLayeredIndexSliced extends Application {
     parent[0] = 0;
     cnt[0] = Long.MAX_VALUE;
     for(int i = 1; i < parents.length; i++) {
-      int best = -1;
+      int best = i;
       long total = 0, bcount = -1;
       for(Int2LongMap.Entry p : parents[i].int2LongEntrySet()) {
         final long c = p.getLongValue();
@@ -680,10 +688,19 @@ public class BuildLayeredIndexSliced extends Application {
     // The row is already run-length encoded, but we need to perform the
     // translation mapping.
     for(pos[0] = 0; pos[0] < l;) {
-      // Map the value:
-      len = writeUnsignedVarint(buffer, len, map[readUnsignedVarint(row, pos)]);
+      // Old value and count
+      final int preval = readUnsignedVarint(row, pos);
+      final int cntm1 = readUnsignedVarint(row, pos);
+      // Mapped value:
+      final int newval = map[preval];
+      assert (newval >= 0) : String.format("Mapped %d to negative value %d. Count: %d", preval, newval, cntm1 + 1);
+      if(newval < 0) {
+        throw new ArrayIndexOutOfBoundsException(newval);
+      }
+      // Write the new index:
+      len = writeUnsignedVarint(buffer, len, newval);
       // Copy the repetition count:
-      len = writeUnsignedVarint(buffer, len, readUnsignedVarint(row, pos));
+      len = writeUnsignedVarint(buffer, len, cntm1);
     }
     return len;
   }
