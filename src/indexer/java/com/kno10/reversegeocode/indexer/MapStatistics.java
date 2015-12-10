@@ -25,6 +25,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
+import java.util.Locale;
 
 /**
  * Dump some basic statistics on an index.
@@ -37,6 +38,9 @@ public class MapStatistics {
 
   /** Decoder */
   static final CharsetDecoder DECODER = Charset.forName("UTF-8").newDecoder();
+
+  /** Convert bytes to MB */
+  private static final double MB = 1024. * 1024.;
 
   public static void stats(String filename) throws IOException {
     try (RandomAccessFile file = new RandomAccessFile(filename, "r")) {
@@ -67,21 +71,23 @@ public class MapStatistics {
       assert (metapos[numentries] == filesize);
       int mapsize = rowpos[height] - rowpos[0];
       int metasize = metapos[numentries] - metapos[0];
-      System.out.println("Map size: " + width + " x " + height);
-      System.out.println("Map area: lan " + -yshift + " to " + (ycover - yshift) + " lon " + -xshift + " to " + (xcover - xshift));
-      System.out.println("Size of map data: " + mapsize);
-      System.out.println("Average bytes per row: " + (mapsize / (double) height));
-      System.out.println("Row compression factor: " + (width * (double) height / (double) mapsize));
-      System.out.println("Metadata entries: " + numentries);
-      System.out.println("Size of metadata: " + metasize);
-      System.out.println("Average bytes per meta: " + (metasize / (double) numentries));
-      System.out.println("Total bytes per pixel: " + (filesize / (width * (double) height)));
+      System.out.format(Locale.ROOT, "Map size:\t%d x %d\n", width, height);
+      System.out.format(Locale.ROOT, "Longitude cover:\t%.1f\t%.1f\n", -xshift, xcover - xshift);
+      System.out.format(Locale.ROOT, "Latitude cover:\t%.1f\t%.1f\n", -yshift, ycover - yshift);
+      System.out.format(Locale.ROOT, "Total size:\t%d\t(%.3f MB)\n", filesize, filesize / MB);
+      System.out.format(Locale.ROOT, "Size of map data:\t%d\t(%.3f MB)\n", mapsize, mapsize / MB);
+      System.out.format(Locale.ROOT, "Average bytes per row:\t%.1f\n", mapsize / (double) height);
+      System.out.format(Locale.ROOT, "Row compression factor:\t%.1f\n", width * (double) height / (double) mapsize);
+      System.out.format(Locale.ROOT, "Metadata entries:\t%d\n", numentries);
+      System.out.format(Locale.ROOT, "Size of metadata:\t%d\t(%.3f MB)\n", metasize, metasize / MB);
+      System.out.format(Locale.ROOT, "Average bytes per meta:\t%.1f\n", metasize / (double) numentries);
+      System.out.format(Locale.ROOT, "Total bytes per pixel:\t%f\n", filesize / (width * (double) height));
     }
   }
 
   public static void main(String[] args) {
     try {
-      for (String arg : args) {
+      for(String arg : args) {
         stats(arg);
       }
     }
