@@ -1,5 +1,7 @@
 # Incredibly Fast Reverse Geocoding with OpenStreetMap Data
 
+[![DOI:10.5282/ubm/data.61](https://img.shields.io/badge/DOI-10.5282%2Fubm%2Fdata.61-brightgreen.svg)](http://dx.doi.org/10.5282/ubm/data.61)
+
 The goal of this project is to build a primitive but incredibly fast
 reverse geocoding (coordinates to location lookup) system.
 
@@ -8,13 +10,14 @@ The basic principle is simple:
 - build a lookup map that can be stored reasonably
 - to geocode coordinates, look them up in the map
 
-The map will look roughly like this (this is, in fact, a scaled down map as
-produced by this tool when visualization is enabled - this is the coarsest
-version only, with 0.1 degree resolution):
+The map will look roughly like this
+(this is a visualization of the lookup map with 0.5 degree resolution
+-- the finest has the 1000 fold resolution!):
 
-![Visualization](data/osm-20150126-0.10-visualization.png)
+![Visualization](data/osm-20151130-0.5-2.png)
 
 However, things with OSM are not as easy as one may expect:
+
 - OSM is a *lot* of data. It may use up all your memory easily.
   We are talking of 2.7 *billion* nodes for the planet file,
   and 270 million ways and 3.1 million relations.
@@ -24,14 +27,20 @@ However, things with OSM are not as easy as one may expect:
   the PBF file format that exploit delta compression; and strings are shared
   via a dictionary - and trust me, you don't want to process the XML dump
   using a DOM parser and XPath either...
-- Polygons in OSM are tricky, in particular [multipolygons](http://wiki.openstreetmap.org/wiki/Relation:multipolygon)
+- To reduce maintainance, OSM is heavily designed to share nodes and ways for
+  multiple purposes. In particular for boundaries a single way can be used
+  multiple times, such as denote the border of two countries, and participating
+  in the polygons of countries, counties, cities at the border, ...
+- Assembling polygons in OSM is quite tricky; and often polygons are incomplete
+  (see also the documentation on [OSM multipolygons](http://wiki.openstreetmap.org/wiki/Relation:multipolygon))
 
-My first prototypes on the full data always were running out of memory; reducing
-the data set via Osmosis did not work, as it led to missing ways. So I needed
-to carefully build this in Java, to conserve memory. Osmosis reads and writes data
-multiple times (to large temporary files) - I decided to design my approach around
-reading the input data multiple times instead, even if this means re-reading data
-unnecessarily, at the benefit of not having to write large temporary files.
+My first prototypes in Python were running out of memory on the full data set;
+reducing the data set via Osmosis did not work, as it led to missing ways. So I
+needed to carefully build this in Java, to conserve memory. Osmosis reads and
+writes data multiple times (to large temporary files) - I decided to design my
+approach around reading the input data multiple times instead, even if this
+means re-reading data unnecessarily, at the benefit of not having to write
+large temporary files.
 
 ## Index Query
 
@@ -63,27 +72,55 @@ The exact columns are easy to vary. For the provided data files, there is
 
 So how "incredibly fast" is it?
 
-I've added JMH unit tests to benchmark the throughput on a i7-3770 CPU with 3.4 GHz,
-which can boost to 3.9 GHz (so the benchmark probably is at 3.9 GHz)
+I've added JMH unit tests to benchmark the throughput on a i7-3770 CPU with 3.4 GHz.
+Values are given in microseconds (1us = 1e-6 s) per operation, and operations per microsecond.
 
-| Method                             | Runtime          | Throughput       |
-|:-----------------------------------|-----------------:|-----------------:|
-| Lookup with caching of entities    |   660,954 ns/op  | 1518458,537 op/s |
-| Lookup without caching of entities |  1117,372 ns/op  |  867683,409 op/s |
-| Open, query, close cycles          | 31413,628 ns/op  |   31850,256 op/s |
-| Random lon+lat pair generation     |    43,474 ns/op  |22930984,547 op/s |
+| Method                             | Resolution | Runtime      | Throughput    |
+|:-----------------------------------|-----------:|-------------:|--------------:|
+| Lookup with caching of entities    |      0.5-2 |  0.231 us/op |  4.316 ops/us |
+| Lookup with caching of entities    |     0.05-2 |  0.575 us/op |  1.706 ops/us |
+| Lookup with caching of entities    |    0.005-2 |  0.971 us/op |  1.052 ops/us |
+| Lookup with caching of entities    |   0.0005-2 |  1.562 us/op |  0.639 ops/us |
+| Lookup without caching of entities |      0.5-2 |  0.683 us/op |  1.439 ops/us |
+| Lookup without caching of entities |     0.05-2 |  1.114 us/op |  0.928 ops/us |
+| Lookup without caching of entities |    0.005-2 |  1.423 us/op |  0.668 ops/us |
+| Lookup without caching of entities |   0.0005-2 |  2.057 us/op |  0.473 ops/us |
+| Open, query, close cycles          |      0.5-2 | 13.542 us/op |  0.078 ops/us |
+| Open, query, close cycles          |     0.05-2 | 21.221 us/op |  0.048 ops/us |
+| Open, query, close cycles          |    0.005-2 | 36.250 us/op |  0.027 ops/us |
+| Open, query, close cycles          |   0.0005-2 | 84.306 us/op |  0.013 ops/us |
+| Random lon+lat pair generation     |        n/a |  0.047 us/op | 21.297 ops/us |
 
 As you can see, there is a benefit from using the caching included, and the setup cost of
-the memory map is not negligible - it takes 5 times as long to open the file than to query.
+the memory map is not negligible - it takes 50 times as long to open the file than to query.
 
 The benchmark queries *random* coordinates. Some of these will be at the poles and in oceans.
-However, the lookup time of this index is O(1), so it should not matter much whether it is
-a hit or miss, except for decoding cost.
+The index is designed to have very stable lookup times, but lookups in asia tend to be slightly
+slower than lookups in America due to the run-length encoding. For most applications, the
+differences should remain neglible. In particular, the runtime is expected to increase
+sublinear with the data resolution, not quadratic as with a naive map.
 
-Caching is not applied to coordinates, but to the decoding of UTF-8, 0-delimited data into
-an array of Java strings. As you can see, the string operations take about 1600 ns/op,
-about 1/5th of the uncached query time. If your code is natively operating on UTF-8 encoded,
-0-terminate strings (e.g. C code) then this is not needed.
+The last line in above table benchmarks the random number generation. This runtime can
+therefore be subtracted from the other values.
+On the 0.005-2 resolution data set, a cached lookup therefore is about 924 ns.
+In one second, we can perform over 1 million lookups. (1 ops/us = 1 million ops/s)
+
+Caching is not applied to coordinates, but to the decoding of UTF-8,
+`'\0'`-delimited data into
+an array of Java strings. As you can see, the string operations take about 400-500 us/op.
+If your code is natively operating on UTF-8 encoded,
+0-terminated strings (e.g. C code) then this is not needed.
+
+Lookup times increase sub-linear with the data set size:
+
+|Method                           | Resolution | Table size | Runtime     |
+|:--------------------------------|-----------:|-----------:|------------:|
+| Random lon+lat pair generation  |            |            | 0.047 us/op |
+| Lookup with caching of entities |      0.5-2 |   1.602 MB | 0.232 us/op |
+| Lookup with caching of entities |     0.05-2 |   9.775 MB | 0.575 us/op |
+| Lookup with caching of entities |    0.005-2 |  49.098 MB | 0.971 us/op |
+| Lookup with caching of entities |   0.0005-2 | 389.979 MB | 1.562 us/op |
+
 
 ## OSM Data Extraction
 
@@ -105,7 +142,7 @@ likely a lot faster if I had stored the source file on my SSD).
 
 ### Data Structures
 
-We use Goldman-Sachs collections to conserve memory. These classes are excellent
+We use Fastutil collections to conserve memory. These classes are excellent
 hashmaps for *primitive* data types. For nodes, we also use a two level hashmap
 with prefix compression, since node ids were given in sequence not randomly (and thus
 have a lot of common prefixes - in particular, the first 20+ bits of each id are usually 0).
@@ -115,12 +152,10 @@ each coordinate approximately using a single integer.
 
 ### Implementation Notes
 
-While osmosis --used-way --used-node did not work for me with tag filters, it
+While `osmosis --used-way --used-node` did not work for me with tag filters, it
 apparently worked just fine without. Using these filters can reduce the
-planet file substantially, to about 13% of the planet file. This is worth
-doing as a preprocessing step. It reduces the node count from 2.1 billion to
-"just" 460 million, the number of ways to 17 million (the number of relations
-remains unchanged, obviously). This way, 8 GB of RAM should be enough.
+planet file substantially, from 30 GB to 5.1 GB. This is worth
+doing as a preprocessing step.
 
 As of now, you *will* need to use a Debian Linux system.
 Some of the libraries are not available on Maven central, so I had to put
@@ -193,24 +228,25 @@ I am aware there are areas where the data is not yet very good. For example in P
 there is little detailed information, same for Western Australia. You are welcome to
 contribute data: just contribute administrative boundaries
 to [OpenStreetMap](http://www.openstreetmap.org/)!
-For example there is a project underway to
+For example there is a project to
 [add administrative boundaries for Portugal](http://wiki.openstreetmap.org/wiki/WikiProject_Portugal/Divis%C3%B5es_Administrativas/Lista_de_Divis%C3%B5es_Administrativas),
-exactly what is needed for this index. While I'm writing this, somebody is drawing
-the polygons, which will be included in the next build. Isn't that great?
+that already improved the data quality of this index for Portugal substantially.
+Isn't that great?
 
 ## TODO
 
-1. Include oceans
+1. Include ocean information
 2. Fallback to other data for e.g. Western Australia?
 3. Further reduce file size / coding (but not at the cost of speed)
-4. Sort entities by final frequency, to make best use of varint encoding
+4. Use a custom renderer (line-based with RLE to reduce memory?) instead of JavaFX
 
 ## Licensing
 
-The index ''construction'' code is AGPL-3 licensed (see [LICENSE](LICENSE)).
-I am aware this is a rather restrictive license, but I believe in Copyleft and the GPL.
-
 The index ''query'' code is using the liberal BSD 2-clause license.
+
+The index ''construction'' code is AGPL-3 licensed (see [LICENSE](LICENSE)).
+I am aware this is a rather restrictive license, but I believe in Copyleft and the GPL:
+because I shared my code with you, you should also re-share your improvements, please.
 
 The ''data'' is derived from OpenStreetmap, and thus under the
 [Open Data Commons Open Database License](http://www.openstreetmap.org/copyright)
